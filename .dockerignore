@@ -1,0 +1,5 @@
+ui/node_modules
+web/dist
+.git
+*.md
+!README.md

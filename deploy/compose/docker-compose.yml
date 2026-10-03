@@ -1,0 +1,37 @@
+# One-command local stack: Postgres + Theophylax with demo data.
+#   docker compose -f deploy/compose/docker-compose.yml up --build
+#   open http://localhost:8080   (admin@example.com / change-me-please)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: theophylax
+      POSTGRES_PASSWORD: theophylax
+      POSTGRES_DB: theophylax
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U theophylax"]
+      interval: 3s
+      retries: 20
+
+  theophylax:
+    build: { context: ../.., dockerfile: Dockerfile }
+    depends_on: { postgres: { condition: service_healthy } }
+    ports: ["8080:8080"]
+    environment:
+      THEOPHYLAX_DATABASE_URL: postgres://theophylax:theophylax@postgres:5432/theophylax?sslmode=disable
+      # Generate your own: openssl rand -hex 32. Losing it makes stored credentials unreadable.
+      THEOPHYLAX_MASTER_KEY: ${THEOPHYLAX_MASTER_KEY:-6b1f0e8a3c2d4f5a7b9c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c}
+      THEOPHYLAX_PUBLIC_URL: http://localhost:8080
+      THEOPHYLAX_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      THEOPHYLAX_BOOTSTRAP_ADMIN_PASSWORD: change-me-please
+      THEOPHYLAX_SEED_DEMO: "true"
+      THEOPHYLAX_DEV_MODE: "true"
+      # Optional real providers — reference them from connection strings as ${env:NAME}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+
+volumes:
+  pgdata: {}

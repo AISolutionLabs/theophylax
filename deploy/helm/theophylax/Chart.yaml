@@ -1,0 +1,8 @@
+apiVersion: v2
+name: theophylax
+description: Enterprise AI gateway — governed, provable access to Anthropic, AWS Bedrock and Azure models.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [ai-gateway, llm, anthropic, bedrock, azure, guardrails]
+home: https://github.com/theophylax/theophylax

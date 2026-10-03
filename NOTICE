@@ -1,0 +1,7 @@
+Theophylax
+Copyright 2026 The Theophylax Authors
+
+This product includes software developed by third parties:
+- pgx (MIT) https://github.com/jackc/pgx
+- golang.org/x/text (BSD-3-Clause)
+- React, React Router, TanStack Query, lucide-react (MIT); Archivo and JetBrains Mono fonts (SIL OFL 1.1)

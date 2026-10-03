@@ -1,0 +1,10 @@
+Theophylax is starting.
+
+  Console:   {{ .Values.publicURL }}
+  Gateway:   {{ .Values.publicURL }}/v1/messages   (Anthropic)   ·   /v1/chat/completions (OpenAI)
+  Metrics:   /metrics      Health: /healthz /readyz
+  Receipts:  {{ .Values.publicURL }}/.well-known/theophylax-receipt-keys.json
+
+Claude Code:
+  export ANTHROPIC_BASE_URL={{ .Values.publicURL }}
+  export ANTHROPIC_AUTH_TOKEN=<gateway key from the console>

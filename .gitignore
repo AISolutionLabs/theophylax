@@ -1,0 +1,8 @@
+/theophylax
+/bin/
+ui/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+*.env
+.DS_Store
+!web/dist/index.html

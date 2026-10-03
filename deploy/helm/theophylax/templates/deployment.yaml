@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "theophylax.fullname" . }}
+  labels: {{- include "theophylax.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "theophylax.selector" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 25% }
+  template:
+    metadata:
+      labels:
+        {{- include "theophylax.selector" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      annotations:
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "theophylax.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: theophylax
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: THEOPHYLAX_ADDR, value: ":8080" }
+            - { name: THEOPHYLAX_PUBLIC_URL, value: {{ .Values.publicURL | quote }} }
+            - name: THEOPHYLAX_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: {{ .Values.database.existingSecret }}, key: {{ .Values.database.existingSecretKey }} } }
+            - name: THEOPHYLAX_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Values.masterKey.existingSecret }}, key: {{ .Values.masterKey.existingSecretKey }} } }
+            - { name: THEOPHYLAX_DB_MAX_CONNS, value: {{ .Values.database.maxConns | quote }} }
+            - { name: THEOPHYLAX_LOCAL_LOGIN, value: {{ .Values.config.localLogin | quote }} }
+            - { name: THEOPHYLAX_LOG_RETENTION_DAYS, value: {{ .Values.config.logRetentionDays | quote }} }
+            - { name: THEOPHYLAX_STDOUT_REQUEST_LOGS, value: {{ .Values.config.stdoutRequestLogs | quote }} }
+            - { name: THEOPHYLAX_UPSTREAM_TIMEOUT, value: {{ .Values.config.upstreamTimeout | quote }} }
+            - { name: THEOPHYLAX_MAX_BODY_MB, value: {{ .Values.config.maxBodyMB | quote }} }
+            - { name: THEOPHYLAX_RECEIPT_CHECKPOINT_INTERVAL, value: {{ .Values.config.receiptCheckpointInterval | quote }} }
+            - { name: THEOPHYLAX_TRUST_PROXY_HEADERS, value: {{ .Values.config.trustProxyHeaders | quote }} }
+            {{- if .Values.bootstrap.adminEmail }}
+            - { name: THEOPHYLAX_BOOTSTRAP_ADMIN_EMAIL, value: {{ .Values.bootstrap.adminEmail | quote }} }
+            - { name: THEOPHYLAX_BOOTSTRAP_ORG, value: {{ .Values.bootstrap.orgName | quote }} }
+            - name: THEOPHYLAX_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.bootstrap.existingSecret }}, key: ADMIN_PASSWORD } }
+            {{- end }}
+            {{- range $k, $v := .Values.config.extraEnv }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle:
+            # Let load balancers deregister the pod before in-flight streams are drained.
+            preStop: { sleep: { seconds: 10 } }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range .Values.topologySpreadConstraints }}
+        - {{ toYaml . | nindent 10 | trim }}
+          labelSelector:
+            matchLabels: {{- include "theophylax.selector" $ | nindent 14 }}
+        {{- end }}
+      {{- end }}

@@ -1,0 +1,16 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "theophylax.fullname" . }}
+  labels: {{- include "theophylax.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ include "theophylax.fullname" . }} }
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }} } }
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }
+{{- end }}

@@ -1,0 +1,100 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/theophylax/theophylax
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public URL users and IdPs reach the gateway on (used for SSO redirects and receipts).
+publicURL: https://ai-gateway.example.com
+
+database:
+  # Use an existing secret with key DATABASE_URL (recommended: RDS/Aurora PostgreSQL 15+ with IAM or rotated creds).
+  existingSecret: theophylax-db
+  existingSecretKey: DATABASE_URL
+  maxConns: 20
+
+# 32-byte master key (hex/base64) for credential encryption, sessions and receipts.
+# Store in AWS Secrets Manager / Vault and sync with External Secrets.
+masterKey:
+  existingSecret: theophylax-master-key
+  existingSecretKey: MASTER_KEY
+
+bootstrap:
+  # Only used when the database has no users yet.
+  adminEmail: ""
+  existingSecret: ""          # secret with key ADMIN_PASSWORD
+  orgName: default
+
+config:
+  localLogin: true            # set false once SSO is configured
+  logRetentionDays: 90
+  stdoutRequestLogs: true     # JSON request logs for Loki / Splunk / CloudWatch
+  upstreamTimeout: 10m
+  maxBodyMB: 32
+  receiptCheckpointInterval: 2m
+  trustProxyHeaders: true
+  extraEnv: {}                # e.g. HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # IRSA for Bedrock:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/theophylax-bedrock
+  # Azure workload identity (federated from EKS works too):
+  #   azure.workload.identity/client-id: <client-id>
+
+podLabels: {}
+podAnnotations: {}
+
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { memory: 1Gi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # Streaming responses: disable buffering and raise timeouts, e.g. for ingress-nginx:
+    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+    # For AWS ALB: alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=900
+  hosts:
+    - host: ai-gateway.example.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  # Egress to providers goes via your proxy/NAT; allow DNS + Postgres + 443.
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+
+terminationGracePeriodSeconds: 90

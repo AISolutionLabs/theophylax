@@ -90,8 +90,12 @@ export default function Playground() {
     }
   }
 
-  const price = models.data.find((m) => m.name === model)
-  const cost = (m?: Turn['meta']) => price?.input_price != null && m?.inTok != null ? ((m.inTok ?? 0) * price.input_price + (m.outTok ?? 0) * (price.output_price ?? 0)) / 1e6 : null
+  // Estimate from the serving deployment's list price; the exact figure is on the request log.
+  const deps = models.data.find((m) => m.name === model)?.deployments ?? []
+  const cost = (m?: Turn['meta']) => {
+    const p = deps.find((d) => d.provider_name === m?.provider)?.pricing
+    return p?.input != null && m?.inTok != null ? ((m.inTok ?? 0) * p.input + (m.outTok ?? 0) * (p.output ?? 0)) / 1e6 : null
+  }
 
   if (!projects.isLoading && !usable.length) {
     return (<><PageHead title="Playground" /><Empty icon={<Send size={20} />} title="You need a project to try models" action={<Link className="btn primary" to="/teams">Go to Teams & projects</Link>}>Playground traffic is attributed to a project, just like API keys. Ask a team admin to add you to one.</Empty></>)

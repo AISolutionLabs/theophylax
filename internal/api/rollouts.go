@@ -121,6 +121,14 @@ func (a *API) createRollout(c *Ctx) (any, error) {
 	r := &gateway.Rollout{ID: util.NewID("ro"), ModelID: *in.ModelID, CandidateProviderID: *in.CandidateProviderID, CandidateUpstream: *in.CandidateUpstream,
 		Stage: "shadow", ShadowPct: 10, CanaryPct: 10, MinSamples: 50, WinThreshold: 0.5, MaxErrorRate: 0.05, MaxLatencyRatio: 1.5, AutoPromote: true, AutoRollback: true, CreatedBy: &uid}
 	applyRolloutIn(r, &in)
+	m, err := store.GetByID[store.Model](c, a.St.Pool, "models", r.ModelID)
+	if err != nil {
+		return nil, err
+	}
+	// Promotion adds a deployment, so the candidate must satisfy the same rules.
+	if err := a.checkModelSuffix(c, r.CandidateProviderID, m.Name); err != nil {
+		return nil, err
+	}
 	if in.SkipShadow {
 		r.Stage = "canary"
 	} else if r.JudgeModel == "" {
@@ -188,8 +196,16 @@ func (a *API) rolloutAction(c *Ctx) (any, error) {
 	case "promote":
 		err = gateway.PromoteRollout(c, a.St, a.Audit, id, c.actor(), "promoted manually "+who)
 	case "rollback":
-		if r.Stage == "promoted" || r.Stage == "rolled_back" {
-			return nil, badReq("rollout already finished")
+		if r.Stage == "promoted" {
+			res, err := gateway.RevertPromotion(c, a.St, a.Audit, id, c.actor(), "promotion rolled back "+who)
+			if err != nil {
+				return nil, err
+			}
+			a.changed(c)
+			return map[string]any{"ok": true, "reverted": res}, nil
+		}
+		if r.Stage == "rolled_back" {
+			return nil, badReq("rollout is already rolled back")
 		}
 		err = set("rolled_back", "", "rolled back manually "+who)
 	default:

@@ -135,20 +135,97 @@ func (b *Budgets) Current(scopeType, scopeID, period string) (float64, int64) {
 	return s.baseCost + s.pendCost, s.baseTok + s.pendTok
 }
 
-// Exceeded returns the first blocking budget that is exhausted.
-func (b *Budgets) Exceeded(snap *Snapshot, scopes []ScopeRef) *store.Budget {
+// PersonScopes are the counters a person's spend is recorded under: their
+// spend in the org and their spend in the team the request is attributed to.
+func PersonScopes(orgID, teamID, userID string) []ScopeRef {
+	if userID == "" {
+		return nil
+	}
+	out := []ScopeRef{{"org_user", orgID + "/" + userID}}
+	if teamID != "" {
+		out = append(out, ScopeRef{"team_user", teamID + "/" + userID})
+	}
+	return out
+}
+
+// PersonalBudget returns the budget that limits one person for a period, and
+// the counter it is measured against. Precedence: the person's own budget,
+// then their team's per-person default, then the org's per-person default.
+func PersonalBudget(snap *Snapshot, orgID, teamID, userID, period string) (*store.Budget, ScopeRef) {
+	if userID == "" {
+		return nil, ScopeRef{}
+	}
+	pick := func(key string, perUser bool) *store.Budget {
+		for _, b := range snap.Budgets[key] {
+			if b.OrgID == orgID && b.Period == period && b.PerUser == perUser {
+				return b
+			}
+		}
+		return nil
+	}
+	if b := pick("user:"+userID, false); b != nil {
+		return b, ScopeRef{"org_user", orgID + "/" + userID}
+	}
+	if teamID != "" {
+		if b := pick("team:"+teamID, true); b != nil {
+			return b, ScopeRef{"team_user", teamID + "/" + userID}
+		}
+	}
+	if b := pick("org:"+orgID, true); b != nil {
+		return b, ScopeRef{"org_user", orgID + "/" + userID}
+	}
+	return nil, ScopeRef{}
+}
+
+// Spent is a budget's usage in its current period. Per-person defaults have no
+// single figure; use PersonalBudget for a given person.
+func (b *Budgets) Spent(bud *store.Budget) (float64, int64) {
+	if bud.ScopeType == "user" {
+		return b.Current("org_user", bud.OrgID+"/"+bud.ScopeID, bud.Period)
+	}
+	return b.Current(bud.ScopeType, bud.ScopeID, bud.Period)
+}
+
+func overLimit(bud *store.Budget, cost float64, tok int64) bool {
+	return (bud.LimitUSD != nil && cost >= *bud.LimitUSD) || (bud.LimitTokens != nil && tok >= *bud.LimitTokens)
+}
+
+// Exceeded returns the first blocking budget that is exhausted: the person's
+// effective per-person budget for each period, then every pooled budget on
+// the request's scopes.
+func (b *Budgets) Exceeded(snap *Snapshot, orgID, teamID, userID string, scopes []ScopeRef) *store.Budget {
+	for _, p := range Periods {
+		if bud, ctr := PersonalBudget(snap, orgID, teamID, userID, p); bud != nil && bud.Action == "block" {
+			if cost, tok := b.Current(ctr.Type, ctr.ID, p); overLimit(bud, cost, tok) {
+				return bud
+			}
+		}
+	}
 	for _, sc := range scopes {
+		if sc.Type == "user" {
+			continue // personal budgets are resolved above
+		}
 		for _, bud := range snap.Budgets[sc.Type+":"+sc.ID] {
-			if bud.Action != "block" {
+			if bud.Action != "block" || bud.PerUser {
 				continue
 			}
-			cost, tok := b.Current(sc.Type, sc.ID, bud.Period)
-			if (bud.LimitUSD != nil && cost >= *bud.LimitUSD) || (bud.LimitTokens != nil && tok >= *bud.LimitTokens) {
+			if cost, tok := b.Current(sc.Type, sc.ID, bud.Period); overLimit(bud, cost, tok) {
 				return bud
 			}
 		}
 	}
 	return nil
+}
+
+// Describe names a budget for error messages.
+func Describe(b *store.Budget) string {
+	switch {
+	case b.ScopeType == "user":
+		return b.Period + " personal budget"
+	case b.PerUser:
+		return b.Period + " per-person " + b.ScopeType + " budget"
+	}
+	return b.Period + " " + b.ScopeType + " budget"
 }
 
 func (b *Budgets) AddPending(scopes []ScopeRef, cost float64, tokens int64, at time.Time) {

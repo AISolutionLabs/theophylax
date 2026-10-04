@@ -31,6 +31,8 @@ type Config struct {
 	DBMaxConns        int32
 	LogBufferSize     int
 	TrustedProxies    bool
+	PricingURL        string
+	PricingRefresh    time.Duration
 }
 
 func env(k, def string) string {
@@ -95,6 +97,8 @@ func Load() (*Config, error) {
 		DBMaxConns:        int32(envInt("THEOPHYLAX_DB_MAX_CONNS", 20)),
 		LogBufferSize:     envInt("THEOPHYLAX_LOG_BUFFER", 20000),
 		TrustedProxies:    envBool("THEOPHYLAX_TRUST_PROXY_HEADERS", true),
+		PricingURL:        env("THEOPHYLAX_PRICING_URL", ""),
+		PricingRefresh:    envDur("THEOPHYLAX_PRICING_REFRESH", 6*time.Hour),
 	}
 	mk := env("THEOPHYLAX_MASTER_KEY", "")
 	switch {

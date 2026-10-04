@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"theophylax/internal/auth"
+	"theophylax/internal/pricing"
 	"theophylax/internal/providers"
 	"theophylax/internal/store"
 	"theophylax/internal/util"
@@ -36,6 +38,8 @@ type providerView struct {
 	Error       string `json:"error,omitempty"`
 	CanManage   bool   `json:"can_manage"`
 	Deployments int    `json:"deployment_count"`
+	// OAuth is set for providers using auth=oauth (visible to their managers).
+	OAuth *providerOAuthStatus `json:"oauth,omitempty"`
 }
 
 func (a *API) listProviders(c *Ctx) (any, error) {
@@ -68,6 +72,11 @@ func (a *API) listProviders(c *Ctx) (any, error) {
 		}
 		if !v.CanManage {
 			v.ConnRedacted = p.Kind + "://…"
+		} else if strings.Contains(p.ConnRedacted, "auth=oauth") {
+			v.OAuth = a.oauthStatus(c, &p)
+			if v.OAuth != nil && v.OAuth.Grant == "authorization_code" && !v.OAuth.Connected && v.Status == "ready" {
+				v.Status = "not_connected"
+			}
 		}
 		out = append(out, v)
 	}
@@ -148,6 +157,21 @@ func (a *API) updateProvider(c *Ctx) (any, error) {
 		_, pc, err := a.buildProvider(cs, p.Config)
 		if err != nil {
 			return nil, err
+		}
+		if suffix := providers.ModelSuffixFor(cs); suffix != "" {
+			var bad []string
+			rows, err := a.St.Pool.Query(c, `SELECT DISTINCT m.name FROM deployments d JOIN models m ON m.id=d.model_id WHERE d.provider_id=$1 AND right(m.name, $2) <> $3`, p.ID, len(suffix), suffix)
+			if err == nil {
+				for rows.Next() {
+					var n string
+					_ = rows.Scan(&n)
+					bad = append(bad, n)
+				}
+				rows.Close()
+			}
+			if len(bad) > 0 {
+				return nil, badReq("models routed through this credential must end with " + suffix + "; rename or remove: " + strings.Join(bad, ", "))
+			}
 		}
 		p.ConnEnc, p.ConnRedacted, p.Kind = a.Box.SealString(cs), pc.Redacted(), pc.Kind
 	} else {
@@ -251,9 +275,10 @@ func (a *API) discoverModels(c *Ctx) (any, error) {
 		}
 		rows.Close()
 	}
+	suffix := providers.ModelSuffix(e.P)
 	out := make([]map[string]any, 0, len(models))
 	for _, m := range models {
-		out = append(out, map[string]any{"id": m.ID, "display_name": m.DisplayName, "kind": m.Kind, "suggested_name": SuggestName(m.ID), "configured": existing[m.ID]})
+		out = append(out, map[string]any{"id": m.ID, "display_name": m.DisplayName, "kind": m.Kind, "suggested_name": SuggestName(m.ID) + suffix, "configured": existing[m.ID]})
 	}
 	return out, nil
 }
@@ -265,6 +290,9 @@ type deploymentView struct {
 	ProviderName string  `json:"provider_name" db:"provider_name"`
 	ProviderKind string  `json:"provider_kind" db:"provider_kind"`
 	ProviderOrg  *string `json:"provider_org_id" db:"provider_org_id"`
+	// Pricing is the upstream list price for this deployment, or nil when the
+	// price catalog has no entry for its upstream model ID.
+	Pricing *pricing.Quote `json:"pricing" db:"-"`
 }
 
 type modelView struct {
@@ -287,6 +315,7 @@ func (a *API) listModels(c *Ctx) (any, error) {
 		if d.ProviderOrg != nil && !c.P.InOrg(*d.ProviderOrg) {
 			continue
 		}
+		d.Pricing = a.Pricing.QuoteFor(d.ProviderKind, d.UpstreamModel)
 		by[d.ModelID] = append(by[d.ModelID], d)
 	}
 	usage := map[string]int64{}
@@ -316,20 +345,15 @@ func (a *API) listModels(c *Ctx) (any, error) {
 }
 
 type modelIn struct {
-	Name            *string   `json:"name"`
-	DisplayName     *string   `json:"display_name"`
-	Family          *string   `json:"family"`
-	Aliases         *[]string `json:"aliases"`
-	InputPrice      *float64  `json:"input_price"`
-	OutputPrice     *float64  `json:"output_price"`
-	CacheReadPrice  *float64  `json:"cache_read_price"`
-	CacheWritePrice *float64  `json:"cache_write_price"`
-	ContextWindow   *int      `json:"context_window"`
-	MaxOutput       *int      `json:"max_output"`
-	Capabilities    *[]string `json:"capabilities"`
-	Status          *string   `json:"status"`
-	Strategy        *string   `json:"strategy"`
-	ClearPrices     bool      `json:"clear_prices"`
+	Name          *string   `json:"name"`
+	DisplayName   *string   `json:"display_name"`
+	Family        *string   `json:"family"`
+	Aliases       *[]string `json:"aliases"`
+	ContextWindow *int      `json:"context_window"`
+	MaxOutput     *int      `json:"max_output"`
+	Capabilities  *[]string `json:"capabilities"`
+	Status        *string   `json:"status"`
+	Strategy      *string   `json:"strategy"`
 }
 
 func applyModelIn(m *store.Model, in *modelIn) {
@@ -344,21 +368,6 @@ func applyModelIn(m *store.Model, in *modelIn) {
 	}
 	if in.Aliases != nil {
 		m.Aliases = *in.Aliases
-	}
-	if in.ClearPrices {
-		m.InputPrice, m.OutputPrice, m.CacheReadPrice, m.CacheWritePrice = nil, nil, nil, nil
-	}
-	if in.InputPrice != nil {
-		m.InputPrice = in.InputPrice
-	}
-	if in.OutputPrice != nil {
-		m.OutputPrice = in.OutputPrice
-	}
-	if in.CacheReadPrice != nil {
-		m.CacheReadPrice = in.CacheReadPrice
-	}
-	if in.CacheWritePrice != nil {
-		m.CacheWritePrice = in.CacheWritePrice
 	}
 	if in.ContextWindow != nil {
 		m.ContextWindow = *in.ContextWindow
@@ -412,6 +421,23 @@ func (a *API) updateModel(c *Ctx) (any, error) {
 		return nil, err
 	}
 	applyModelIn(m, &in)
+	if m.Name != before.Name {
+		var provs []string
+		rows, err := a.St.Pool.Query(c, `SELECT DISTINCT provider_id FROM deployments WHERE model_id=$1`, m.ID)
+		if err == nil {
+			for rows.Next() {
+				var id string
+				_ = rows.Scan(&id)
+				provs = append(provs, id)
+			}
+			rows.Close()
+		}
+		for _, pid := range provs {
+			if err := a.checkModelSuffix(c, pid, m.Name); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := a.St.Update(c, a.St.Pool, "models", m); err != nil {
 		return nil, err
 	}
@@ -464,7 +490,14 @@ func (a *API) createDeployment(c *Ctx) (any, error) {
 	if err := a.deploymentPerm(c, *in.ProviderID); err != nil {
 		return nil, err
 	}
-	d := &store.Deployment{ID: util.NewID("dep"), ModelID: c.Param("id"), ProviderID: *in.ProviderID, UpstreamModel: *in.UpstreamModel, Weight: 1, Enabled: true}
+	m, err := store.GetByID[store.Model](c, a.St.Pool, "models", c.Param("id"))
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkModelSuffix(c, *in.ProviderID, m.Name); err != nil {
+		return nil, err
+	}
+	d := &store.Deployment{ID: util.NewID("dep"), ModelID: m.ID, ProviderID: *in.ProviderID, UpstreamModel: *in.UpstreamModel, Weight: 1, Enabled: true}
 	if in.Weight != nil {
 		d.Weight = max(*in.Weight, 1)
 	}
@@ -547,11 +580,17 @@ func (a *API) importModels(c *Ctx) (any, error) {
 	if err := a.deploymentPerm(c, in.ProviderID); err != nil {
 		return nil, err
 	}
+	var kind string
+	_ = a.St.Pool.QueryRow(c, `SELECT kind FROM providers WHERE id=$1`, in.ProviderID).Scan(&kind)
+	suffix := a.modelSuffix(c, in.ProviderID)
 	var results []map[string]any
 	for _, it := range in.Items {
 		name := it.Name
 		if name == "" {
 			name = SuggestName(it.UpstreamModel)
+		}
+		if !strings.HasSuffix(name, suffix) {
+			name += suffix
 		}
 		m, err := store.Get[store.Model](c, a.St.Pool, `SELECT * FROM models WHERE name=$1`, name)
 		if err == util.ErrNotFound {
@@ -579,9 +618,33 @@ func (a *API) importModels(c *Ctx) (any, error) {
 			results = append(results, map[string]any{"name": name, "error": err.Error()})
 			continue
 		}
-		results = append(results, map[string]any{"name": name, "model_id": m.ID, "deployment_id": d.ID, "priced": m.InputPrice != nil})
+		results = append(results, map[string]any{"name": name, "model_id": m.ID, "deployment_id": d.ID, "priced": a.Pricing.QuoteFor(kind, it.UpstreamModel) != nil})
 	}
 	c.Audit("model.import", "", "provider", in.ProviderID, results)
 	a.changed(c)
 	return results, nil
+}
+
+// modelSuffix is the public-name suffix required for models routed through a
+// custom credential provider ("@acme"), or "".
+func (a *API) modelSuffix(ctx context.Context, providerID string) string {
+	if e := a.Loader.Snapshot().Providers[providerID]; e != nil && e.P != nil {
+		return providers.ModelSuffix(e.P)
+	}
+	p, err := store.GetByID[store.Provider](ctx, a.St.Pool, "providers", providerID)
+	if err != nil || p.Kind != providers.KindCustom {
+		return ""
+	}
+	conn, err := a.Box.OpenString(p.ConnEnc)
+	if err != nil {
+		return ""
+	}
+	return providers.ModelSuffixFor(conn)
+}
+
+func (a *API) checkModelSuffix(ctx context.Context, providerID, modelName string) error {
+	if s := a.modelSuffix(ctx, providerID); s != "" && !strings.HasSuffix(modelName, s) {
+		return badReq(fmt.Sprintf("models routed through credential %q must be named <model>%s (got %q)", strings.TrimPrefix(s, providers.ModelSuffixSep), s, modelName))
+	}
+	return nil
 }

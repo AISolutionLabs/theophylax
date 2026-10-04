@@ -1,5 +1,6 @@
 // Package providers implements upstream model provider adapters (Anthropic,
-// AWS Bedrock, Azure AI Foundry, Azure OpenAI, OpenAI-compatible) and the
+// AWS Bedrock, Azure AI Foundry, Azure OpenAI, OpenAI-compatible, custom
+// credential providers) and the
 // request/response translation between Anthropic and OpenAI wire formats.
 package providers
 
@@ -50,6 +51,8 @@ type Options struct {
 	Timeout    time.Duration
 	DropParams []string
 	Headers    map[string]string
+	// Tokens shares custom-provider access/refresh tokens across replicas.
+	Tokens TokenStore
 }
 
 // New builds a provider from a connection string.
@@ -66,6 +69,9 @@ func New(conn string, opt Options) (Provider, error) {
 		return nil, err
 	}
 	base := baseProvider{id: opt.ID, kind: c.Kind, client: client, drop: opt.DropParams, headers: opt.Headers, conn: c}
+	if c.Get("auth") == "oauth" && (c.Kind == KindAnthropic || c.Kind == KindOpenAI) {
+		return newOAuthProvider(base, c, opt)
+	}
 	switch c.Kind {
 	case KindAnthropic:
 		return newAnthropic(base, c)
@@ -75,6 +81,8 @@ func New(conn string, opt Options) (Provider, error) {
 		return newBedrock(base, c)
 	case KindAzureOpenAI, KindOpenAI:
 		return newOpenAI(base, c)
+	case KindCustom:
+		return newCustom(base, c, opt)
 	case KindMock:
 		return newMock(base, c), nil
 	}

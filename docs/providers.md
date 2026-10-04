@@ -61,8 +61,61 @@ openai://api.openai.com?api_key=${env:OPENAI_API_KEY}
 openai://vllm.internal:8000?base_url=http://vllm.internal:8000/v1
 ```
 
+## Custom credential provider
+
+For any OpenAI- or Anthropic-compatible API that sits behind credentials the gateway must manage. The gateway adds the credentials to every call, keeps access tokens fresh, and renews and retries once when the upstream rejects a token (401).
+
+```
+# HTTP Basic on every request
+custom://api.acme.com/v1?name=acme&auth=basic&username=svc&password=${env:ACME_PASSWORD}
+
+# Basic client credentials exchanged for an access + refresh token
+custom://api.acme.com/v1?name=acme&auth=basic&username=<client id>&password=${env:ACME_SECRET}&token_url=https://auth.acme.com/oauth/token
+
+# Bearer token, renewed with the refresh token
+custom://api.acme.com/v1?name=acme&auth=bearer&token=${env:ACME_TOKEN}&refresh_token=${env:ACME_REFRESH}&token_url=https://auth.acme.com/oauth/token&client_id=gateway
+```
+
+| Parameter | |
+|---|---|
+| `name` | **Required.** The credential name. Every catalog model routed through this credential must be named `<model>@<name>`, e.g. `gpt-4o@acme`. Discovery and import add the suffix; adding a deployment to a model without it is refused. |
+| `format` | `openai` (default; calls `<url>/chat/completions` and `<url>/models`) or `anthropic` (calls `<url>/v1/messages` and `<url>/v1/models`). |
+| `auth` | `basic` or `bearer`. |
+| `username`, `password` | Basic credentials. Sent on every request, or, with `token_url`, used as client credentials at the token endpoint. |
+| `grant_type` | With Basic and `token_url`: `client_credentials` (default) or `password` (sends username and password as resource-owner credentials; add `client_id`/`client_secret` if the endpoint needs client authentication). |
+| `token`, `refresh_token` | Bearer access token and optional refresh token. A refresh token needs `token_url`. |
+| `token_url`, `client_id`, `client_secret`, `scope`, `audience` | OAuth 2.0 token endpoint and optional parameters. |
+| `base_url` | Use instead of the host for a plain `http://` endpoint. |
+
+Access tokens are renewed a minute before `expires_in`, or when the upstream returns 401. The refresh token is tried first; with Basic, the gateway falls back to the original grant. Tokens obtained this way are stored encrypted in Postgres (`provider_tokens`) and shared by every replica under a lock, so refresh tokens the identity provider rotates are never lost or reused. Changing the credentials discards the stored tokens. These requests have no upstream list price, so Billing shows them as unpriced.
+
+## OAuth 2.0
+
+Anthropic, OpenAI-compatible and custom credential providers accept `auth=oauth`. The gateway obtains access tokens, renews them before they expire, and on a 401 renews the token and retries the request once. Tokens are stored encrypted in Postgres and shared by every replica.
+
+```
+# Client credentials (service to service)
+openai://api.acme.com?auth=oauth&token_url=https://auth.acme.com/oauth/token&client_id=gateway&client_secret=${env:ACME_SECRET}&scope=models.invoke
+
+# Authorization code: an admin signs in once
+anthropic://llm.acme.com?auth=oauth&grant_type=authorization_code&authorize_url=https://auth.acme.com/authorize&token_url=https://auth.acme.com/oauth/token&client_id=gateway&client_secret=${env:ACME_SECRET}&scope=offline_access%20models
+```
+
+| Parameter | |
+|---|---|
+| `grant_type` | `client_credentials` (default) or `authorization_code`. |
+| `token_url`, `client_id` | Required. |
+| `client_secret` | Required for client credentials. Optional for the authorization code grant, where PKCE is always used. |
+| `client_auth` | `basic` (default, `client_secret_basic`) or `post` (`client_secret_post`). |
+| `authorize_url` | Required for `authorization_code`. |
+| `scope`, `audience` | Optional. Include the scope your provider needs to issue a refresh token (often `offline_access`). |
+| `base_url` | API URL, if it isn't `https://<host>` (Anthropic) or `https://<host>/v1` (OpenAI-compatible). |
+
+For the authorization code grant, register the redirect URI `<THEOPHYLAX_PUBLIC_URL>/auth/provider-oauth/callback` with the provider's OAuth app. Then, under **Providers**, click **Connect** and sign in at the provider. Until it's connected, the provider shows **not connected** and its requests fail with a message saying so. The access token is refreshed with the refresh token from then on. If the provider revokes the authorization, requests fail with a message asking an admin to reconnect. **Disconnect** deletes the stored tokens. Changing the OAuth settings also invalidates them, so the provider has to be connected again.
+
 ## Model catalog tips
 
 - Use **aliases** (`sonnet-latest`) and repoint them, or run a **rollout**, when new versions ship.
 - A model named `claude-*` with upstream model `{model}` passes any matching name straight through (day-0 access to new models).
-- Prices are per million tokens. If cache prices are blank, cache reads cost 0.1× and writes 1.25× the input price. Always check your provider's current price list.
+- Prices are not entered by hand. Each request is billed at the upstream provider's list price for the deployment that served it, looked up by its upstream model ID in the price catalog (see [operations](operations.md#pricing)). Input, output, cache-read and cache-write tokens (including 1-hour cache writes and long-context tiers) are each priced at the catalog rate, with no markup.
+- Use the provider's exact model or inference-profile ID so it can be priced: Bedrock regional (`us.`, `eu.`, `apac.`) and `global.` profiles have their own list prices. For Azure OpenAI deployments with custom names, the model name Azure reports in the response is used. Deployments that can't be priced show **no list price** in Models & routing, and their requests are listed separately in Billing.

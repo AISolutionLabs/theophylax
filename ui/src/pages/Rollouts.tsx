@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { GitBranch, Pause, Play, Plus } from 'lucide-react'
+import { GitBranch, Pause, Play, Plus, RotateCcw } from 'lucide-react'
 import { get, patch, post } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useModels, useProviders, useRoutableModels } from '../lib/queries'
@@ -15,6 +15,7 @@ interface Rollout {
   samples: number; wins: number; ties: number; losses: number; judge_errors: number; cand_requests: number; cand_errors: number
   cand_latency_ms: number; inc_latency_ms: number; cand_cost: number; inc_cost: number; canary_requests: number; canary_errors: number; canary_latency_ms: number
   decision_note: string; decided_at?: string; created_at: string; updated_at: string
+  promoted_deployment_id?: string | null; reverted_at?: string | null; reverted_by?: string | null
 }
 
 const STAGES = ['shadow', 'canary', 'promoted'] as const
@@ -34,7 +35,7 @@ function Pipeline({ r }: { r: Rollout }) {
   )
 }
 
-const stageBadge = (r: Rollout) => r.stage === 'promoted' ? <Badge tone="ok">promoted</Badge> : r.stage === 'rolled_back' ? <Badge tone="bad">rolled back</Badge> : r.stage === 'paused' ? <Badge tone="warn">paused</Badge> : <Badge tone="accent">{r.stage}</Badge>
+const stageBadge = (r: Rollout) => r.stage === 'promoted' ? <Badge tone="ok">promoted</Badge> : r.stage === 'rolled_back' ? <Badge tone="bad">{r.reverted_at ? 'promotion rolled back' : 'rolled back'}</Badge> : r.stage === 'paused' ? <Badge tone="warn">paused</Badge> : <Badge tone="accent">{r.stage}</Badge>
 
 export default function Rollouts() {
   const { isPlatformAdmin } = useApp()
@@ -126,7 +127,7 @@ function RolloutDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { isPlatformAdmin } = useApp()
   const d = useQuery({ queryKey: ['rollout', id], queryFn: () => get<{ rollout: Rollout; samples: any[] }>(`/api/rollouts/${id}`), refetchInterval: 8000 })
   const [confirm, setConfirm] = useState<'promote' | 'rollback' | null>(null)
-  const act = useAction((a: string) => post(`/api/rollouts/${id}/${a}`), { done: (_r: any) => 'Rollout updated', invalidate: [['rollouts'], ['rollout'], ['models']], onSuccess: () => setConfirm(null) })
+  const act = useAction((a: string) => post<any>(`/api/rollouts/${id}/${a}`), { done: (res: any) => res?.reverted ? `Promotion rolled back · previous routing restored${res.reverted.kept_newer ? ` · ${res.reverted.kept_newer} newer route(s) kept` : ''}` : 'Rollout updated', invalidate: [['rollouts'], ['rollout'], ['models']], onSuccess: () => setConfirm(null) })
   const upd = useAction((body: any) => patch(`/api/rollouts/${id}`, body), { done: 'Rollout updated', invalidate: [['rollouts'], ['rollout']] })
   const r = d.data?.rollout
   const active = r && ['shadow', 'canary', 'paused'].includes(r.stage)
@@ -138,6 +139,9 @@ function RolloutDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         <span className="spacer" />
         <Button variant="danger" onClick={() => setConfirm('rollback')}>Roll back</Button>
         <Button variant="primary" onClick={() => setConfirm('promote')}>Promote now</Button>
+      </> : isPlatformAdmin && r?.stage === 'promoted' ? <>
+        <span className="spacer" />
+        <Button variant="danger" onClick={() => setConfirm('rollback')}><RotateCcw size={14} /> Roll back promotion</Button>
       </> : undefined}>
       {d.isLoading ? <Loading /> : d.error ? <ErrorNote error={d.error} /> : r && (
         <div className="stack">
@@ -167,8 +171,10 @@ function RolloutDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           </table>
         </div>
       )}
-      <Confirm open={!!confirm} danger={confirm === 'rollback'} title={confirm === 'promote' ? 'Promote the candidate now?' : 'Roll back this rollout?'}
-        body={confirm === 'promote' ? 'The candidate becomes the primary route for this model. Current deployments stay as failover.' : 'The candidate stops receiving shadow and canary traffic. Routing returns to the current deployments.'}
+      <Confirm open={!!confirm} danger={confirm === 'rollback'} title={confirm === 'promote' ? 'Promote the candidate now?' : r?.stage === 'promoted' ? `Roll back the promotion of ${r.candidate_upstream}?` : 'Roll back this rollout?'}
+        body={confirm === 'promote' ? 'The candidate becomes the primary route for this model. Current deployments stay as failover.'
+          : r?.stage === 'promoted' ? <>Removes the <span className="mono">{r.provider_name} · {r.candidate_upstream}</span> route this promotion added and restores each earlier route's priority, weight and on/off setting to what it was just before the promotion. Routes added since then are kept. Clients keep using the same model name.</>
+          : 'The candidate stops receiving shadow and canary traffic. Routing returns to the current deployments.'}
         confirmLabel={confirm === 'promote' ? 'Promote' : 'Roll back'} onClose={() => setConfirm(null)} onConfirm={() => confirm && act.mutate(confirm)} busy={act.isPending} />
     </Drawer>
   )

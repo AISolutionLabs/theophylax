@@ -124,23 +124,19 @@ type Provider struct {
 }
 
 type Model struct {
-	ID              string    `db:"id" json:"id"`
-	Name            string    `db:"name" json:"name"`
-	DisplayName     string    `db:"display_name" json:"display_name"`
-	Family          string    `db:"family" json:"family"`
-	Aliases         []string  `db:"aliases" json:"aliases"`
-	InputPrice      *float64  `db:"input_price" json:"input_price"`
-	OutputPrice     *float64  `db:"output_price" json:"output_price"`
-	CacheReadPrice  *float64  `db:"cache_read_price" json:"cache_read_price"`
-	CacheWritePrice *float64  `db:"cache_write_price" json:"cache_write_price"`
-	ContextWindow   int       `db:"context_window" json:"context_window"`
-	MaxOutput       int       `db:"max_output" json:"max_output"`
-	Capabilities    []string  `db:"capabilities" json:"capabilities"`
-	Status          string    `db:"status" json:"status"`
-	Strategy        string    `db:"strategy" json:"strategy"`
-	Source          string    `db:"source" json:"source"`
-	CreatedAt       time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+	ID            string    `db:"id" json:"id"`
+	Name          string    `db:"name" json:"name"`
+	DisplayName   string    `db:"display_name" json:"display_name"`
+	Family        string    `db:"family" json:"family"`
+	Aliases       []string  `db:"aliases" json:"aliases"`
+	ContextWindow int       `db:"context_window" json:"context_window"`
+	MaxOutput     int       `db:"max_output" json:"max_output"`
+	Capabilities  []string  `db:"capabilities" json:"capabilities"`
+	Status        string    `db:"status" json:"status"`
+	Strategy      string    `db:"strategy" json:"strategy"`
+	Source        string    `db:"source" json:"source"`
+	CreatedAt     time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
 }
 
 type Deployment struct {
@@ -169,16 +165,19 @@ type GuardrailPolicy struct {
 }
 
 type Budget struct {
-	ID          string    `db:"id" json:"id"`
-	OrgID       string    `db:"org_id" json:"org_id"`
-	ScopeType   string    `db:"scope_type" json:"scope_type"`
-	ScopeID     string    `db:"scope_id" json:"scope_id"`
-	Period      string    `db:"period" json:"period"`
-	LimitUSD    *float64  `db:"limit_usd" json:"limit_usd"`
-	LimitTokens *int64    `db:"limit_tokens" json:"limit_tokens"`
-	AlertPct    int       `db:"alert_pct" json:"alert_pct"`
-	Action      string    `db:"action" json:"action"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	ID          string   `db:"id" json:"id"`
+	OrgID       string   `db:"org_id" json:"org_id"`
+	ScopeType   string   `db:"scope_type" json:"scope_type"`
+	ScopeID     string   `db:"scope_id" json:"scope_id"`
+	Period      string   `db:"period" json:"period"`
+	LimitUSD    *float64 `db:"limit_usd" json:"limit_usd"`
+	LimitTokens *int64   `db:"limit_tokens" json:"limit_tokens"`
+	// PerUser makes an org or team budget a default limit for each person in
+	// it rather than a pooled cap.
+	PerUser   bool      `db:"per_user" json:"per_user"`
+	AlertPct  int       `db:"alert_pct" json:"alert_pct"`
+	Action    string    `db:"action" json:"action"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 type IdP struct {
@@ -280,6 +279,7 @@ type RequestLog struct {
 	CacheReadTokens  int             `db:"cache_read_tokens" json:"cache_read_tokens"`
 	CacheWriteTokens int             `db:"cache_write_tokens" json:"cache_write_tokens"`
 	CostUSD          float64         `db:"cost_usd" json:"cost_usd"`
+	PriceKey         string          `db:"price_key" json:"price_key"`
 	Attempts         int             `db:"attempts" json:"attempts"`
 	Guardrails       json.RawMessage `db:"guardrails" json:"guardrails"`
 	ClientIP         string          `db:"client_ip" json:"client_ip"`

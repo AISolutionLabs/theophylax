@@ -339,7 +339,11 @@ func (o *OIDC) Exchange(ctx context.Context, issuer, clientID, secret, code, red
 		return "", err
 	}
 	if out.IDToken == "" {
-		return "", fmt.Errorf("token exchange failed: %s %s", out.Error, out.Desc)
+		err := fmt.Errorf("token exchange failed: %s %s", out.Error, out.Desc)
+		if strings.Contains(out.Desc, "AADSTS700025") {
+			err = fmt.Errorf("%w (the Entra app registration is a public client: register the redirect URI under the \"Web\" platform and set \"Allow public client flows\" to No, or remove the client secret from this identity provider to use PKCE only)", err)
+		}
+		return "", err
 	}
 	return out.IDToken, nil
 }

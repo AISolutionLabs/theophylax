@@ -22,6 +22,8 @@ type Anthropic struct {
 	azure    *azureToken
 	azureKey string
 	version  string
+	// external: credentials are added by the HTTP transport (custom providers).
+	external bool
 }
 
 func newAnthropic(b baseProvider, c *Conn) (*Anthropic, error) {
@@ -67,6 +69,7 @@ func (p *Anthropic) Format() Format { return FormatAnthropic }
 
 func (p *Anthropic) auth(ctx context.Context, req *http.Request) error {
 	switch {
+	case p.external:
 	case p.azure != nil:
 		t, err := p.azure.Get(ctx)
 		if err != nil {

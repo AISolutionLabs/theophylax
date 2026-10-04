@@ -100,7 +100,7 @@ function RequestDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 <dt>Served by</dt><dd><span className="mono">{l.upstream_model || '—'}</span> via {l.provider_kind || '—'}{l.attempts > 1 && <Badge tone="warn">failed over after {l.attempts - 1} attempt(s)</Badge>}</dd>
                 <dt>Caller</dt><dd>{l.key_name ? `Key “${l.key_name}”` : l.user_email ?? '—'} · {l.project_name}</dd>
                 <dt>Tokens</dt><dd>{fmtInt(l.input_tokens)} input · {fmtInt(l.output_tokens)} output · {fmtInt(l.cache_read_tokens)} cache read · {fmtInt(l.cache_write_tokens)} cache write</dd>
-                <dt>Cost</dt><dd>{fmtUSD(l.cost_usd, true)}</dd>
+                <dt>Cost</dt><dd>{fmtUSD(l.cost_usd, true)} <span className="muted">{l.price_key === 'mock' ? '· mock provider, not billed' : l.price_key ? <>· list price <span className="mono">{l.price_key}</span></> : l.input_tokens + l.output_tokens > 0 ? '· no upstream list price found' : ''}</span></dd>
                 <dt>Latency</dt><dd>{fmtMs(l.latency_ms)} total · {fmtMs(l.ttfb_ms)} to first byte {l.stream && '(streamed)'}</dd>
                 <dt>Client</dt><dd>{l.client_ip} · <span className="muted">{l.user_agent}</span></dd>
               </dl>

@@ -208,6 +208,6 @@ func (g *Gateway) embeddings(w http.ResponseWriter, r *http.Request) {
 		st.respPL = res.Body
 	}
 	st.log.InputTokens = res.InputTokens
-	st.log.CostUSD = Cost(route.Model, providers.Usage{Input: res.InputTokens})
+	st.log.CostUSD, st.log.PriceKey = g.Pricing.Cost(st.log.ProviderKind, providers.Usage{Input: res.InputTokens}, st.log.UpstreamModel)
 	g.finish(st)
 }

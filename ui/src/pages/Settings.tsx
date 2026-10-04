@@ -5,6 +5,7 @@ import { get, patch, post, type ApiKey, type ScopeSettings } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useRoutableModels } from '../lib/queries'
 import { fmtAgo } from '../lib/format'
+import { AppearancePicker } from '../components/Appearance'
 import { Button, ChipsInput, CodeBlock, Confirm, CopyButton, Field, Input, PageHead, Panel, RoleBadge, Select, useAction } from '../components/ui'
 
 export default function Settings() {
@@ -21,6 +22,7 @@ export default function Settings() {
             <dt>Access</dt><dd className="row wrap" style={{ gap: 6 }}>{me.is_platform_admin && <RoleBadge role="owner" />}{me.is_platform_admin && 'Platform administrator · '}{me.memberships.map((m) => <span key={m.id}>{m.scope_name} <RoleBadge role={m.role} /></span>)}</dd>
           </dl>
         </Panel>
+        <Panel title="Appearance" sub="Saved in this browser. System follows your device's light or dark setting."><div className="appearance" style={{ width: 'auto', padding: 0, maxWidth: 520 }}><AppearancePicker /></div></Panel>
         {me.has_password && <PasswordPanel />}
         <TokensPanel />
         {orgAdmin && <OrgDefaults />}

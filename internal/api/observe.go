@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 
 	"theophylax/internal/auth"
 	"theophylax/internal/gateway"
+	"theophylax/internal/pricing"
 	"theophylax/internal/store"
 	"theophylax/internal/util"
 )
@@ -319,10 +321,10 @@ func (a *API) overview(c *Ctx) (any, error) {
 	var alerts []map[string]any
 	for key, list := range snap.Budgets {
 		for _, b := range list {
-			if b.OrgID != o.ID {
+			if b.OrgID != o.ID || b.PerUser {
 				continue
 			}
-			cost, tok := a.Budgets.Current(b.ScopeType, b.ScopeID, b.Period)
+			cost, tok := a.Budgets.Spent(b)
 			pct := 0.0
 			if b.LimitUSD != nil && *b.LimitUSD > 0 {
 				pct = cost / *b.LimitUSD * 100
@@ -509,4 +511,169 @@ func fillBuckets(in []bucket, interval string, days int) []bucket {
 		}
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Billing: exact consumption cost, priced from upstream list prices.
+
+func (a *API) pricingStatus(c *Ctx) (any, error) {
+	return a.Pricing.Status(), nil
+}
+
+func (a *API) refreshPricing(c *Ctx) (any, error) {
+	if err := c.RequirePlatformAdmin(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(c, time.Minute)
+	defer cancel()
+	if err := a.Pricing.Refresh(ctx); err != nil {
+		return nil, util.Err(502, "api_error", "refreshing price catalog: "+err.Error())
+	}
+	st := a.Pricing.Status()
+	c.Audit("pricing.refresh", "", "pricing", "catalog", st)
+	return st, nil
+}
+
+type billingLine struct {
+	ProviderKind  string         `json:"provider_kind"`
+	ProviderName  string         `json:"provider_name"`
+	UpstreamModel string         `json:"upstream_model"`
+	PriceKey      string         `json:"price_key"`
+	Requests      int64          `json:"requests"`
+	Input         int64          `json:"input_tokens"`
+	Output        int64          `json:"output_tokens"`
+	CacheRead     int64          `json:"cache_read_tokens"`
+	CacheWrite    int64          `json:"cache_write_tokens"`
+	Cost          float64        `json:"cost"`
+	Rates         *pricing.Quote `json:"rates"`
+}
+
+// billing returns a calendar month's consumption, one line per upstream model
+// and catalog price, as an invoice-style statement.
+func (a *API) billing(c *Ctx) (any, error) {
+	o, _, err := a.orgCtx(c, "")
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if m := c.Query("month"); m != "" {
+		t, err := time.Parse("2006-01", m)
+		if err != nil {
+			return nil, badReq("month must be YYYY-MM")
+		}
+		start = t
+	}
+	end := start.AddDate(0, 1, 0)
+
+	var args []any
+	where := a.logFilter(c, o.ID, &args)
+	args = append(args, start, end)
+	where += fmt.Sprintf(" AND l.ts >= $%d AND l.ts < $%d", len(args)-1, len(args))
+	if c.Query("mine") == "true" {
+		args = append(args, c.P.UserID())
+		where += fmt.Sprintf(" AND l.user_id=$%d", len(args))
+	}
+
+	lines := []billingLine{}
+	rows, err := a.St.Pool.Query(c, `SELECT l.provider_kind, COALESCE(min(p.name),''), l.upstream_model, l.price_key, count(*),
+		COALESCE(sum(l.input_tokens),0), COALESCE(sum(l.output_tokens),0), COALESCE(sum(l.cache_read_tokens),0), COALESCE(sum(l.cache_write_tokens),0), COALESCE(sum(l.cost_usd),0)
+		FROM request_logs l LEFT JOIN providers p ON p.id=l.provider_id
+		WHERE `+where+` AND l.upstream_model <> ''
+		GROUP BY l.provider_kind, l.upstream_model, l.price_key ORDER BY 10 DESC, 5 DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var b billingLine
+		if err := rows.Scan(&b.ProviderKind, &b.ProviderName, &b.UpstreamModel, &b.PriceKey, &b.Requests, &b.Input, &b.Output, &b.CacheRead, &b.CacheWrite, &b.Cost); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if b.PriceKey != "" {
+			b.Rates = a.Pricing.QuoteKey(b.PriceKey)
+		}
+		lines = append(lines, b)
+	}
+	rows.Close()
+
+	var tot struct {
+		Cost                                   float64
+		Requests, Input, Output, CRead, CWrite int64
+		UnpricedRequests, UnpricedTokens       int64
+	}
+	for _, l := range lines {
+		tot.Cost += l.Cost
+		tot.Requests += l.Requests
+		tot.Input += l.Input
+		tot.Output += l.Output
+		tot.CRead += l.CacheRead
+		tot.CWrite += l.CacheWrite
+		if l.PriceKey == "" {
+			if tk := l.Input + l.Output + l.CacheRead + l.CacheWrite; tk > 0 {
+				tot.UnpricedRequests += l.Requests
+				tot.UnpricedTokens += tk
+			}
+		}
+	}
+
+	daily := []bucket{}
+	rows, err = a.St.Pool.Query(c, `SELECT date_trunc('day', l.ts AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', count(*), count(*) FILTER (WHERE status>=400),
+		COALESCE(sum(input_tokens+output_tokens+cache_read_tokens+cache_write_tokens),0), COALESCE(sum(cost_usd),0)
+		FROM request_logs l WHERE `+where+` GROUP BY 1 ORDER BY 1`, args...)
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bucket{}
+	for rows.Next() {
+		var b bucket
+		if err := rows.Scan(&b.T, &b.Requests, &b.Errors, &b.Tokens, &b.Cost); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		have[b.T.UTC().Format("2006-01-02")] = b
+	}
+	rows.Close()
+	last := end
+	if today := now.Truncate(24 * time.Hour).Add(24 * time.Hour); today.Before(last) {
+		last = today
+	}
+	for d := start; d.Before(last); d = d.AddDate(0, 0, 1) {
+		b, ok := have[d.Format("2006-01-02")]
+		if !ok {
+			b = bucket{T: d}
+		}
+		daily = append(daily, b)
+	}
+
+	type teamRow struct {
+		Label string  `json:"label"`
+		Cost  float64 `json:"cost"`
+	}
+	teams := []teamRow{}
+	rows, err = a.St.Pool.Query(c, `SELECT COALESCE((SELECT name FROM teams WHERE id=l.team_id),'—'), COALESCE(sum(cost_usd),0)
+		FROM request_logs l WHERE `+where+` GROUP BY l.team_id HAVING sum(cost_usd) > 0 ORDER BY 2 DESC LIMIT 20`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var t teamRow
+		if err := rows.Scan(&t.Label, &t.Cost); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		teams = append(teams, t)
+	}
+	rows.Close()
+
+	months := []string{}
+	for i := 0; i < 12; i++ {
+		months = append(months, time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, time.UTC).Format("2006-01"))
+	}
+	return map[string]any{
+		"period": map[string]any{"month": start.Format("2006-01"), "start": start, "end": end},
+		"totals": map[string]any{"cost": tot.Cost, "requests": tot.Requests, "input_tokens": tot.Input, "output_tokens": tot.Output,
+			"cache_read_tokens": tot.CRead, "cache_write_tokens": tot.CWrite, "unpriced_requests": tot.UnpricedRequests, "unpriced_tokens": tot.UnpricedTokens},
+		"lines": lines, "daily": daily, "by_team": teams, "months": months, "pricing": a.Pricing.Status(),
+	}, nil
 }

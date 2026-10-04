@@ -13,6 +13,9 @@ type Usage struct {
 	Output     int `json:"output_tokens"`
 	CacheRead  int `json:"cache_read_tokens"`
 	CacheWrite int `json:"cache_write_tokens"`
+	// CacheWrite1h is the part of CacheWrite written with a 1-hour TTL, which
+	// is billed at a higher rate than the default 5-minute TTL.
+	CacheWrite1h int `json:"cache_write_1h_tokens,omitempty"`
 }
 
 func (u Usage) Total() int { return u.Input + u.Output + u.CacheRead + u.CacheWrite }
@@ -41,10 +44,11 @@ func AnthropicUsage(u map[string]any) Usage {
 		return Usage{}
 	}
 	return Usage{
-		Input:      num(u["input_tokens"]),
-		Output:     num(u["output_tokens"]),
-		CacheRead:  num(u["cache_read_input_tokens"]),
-		CacheWrite: num(u["cache_creation_input_tokens"]),
+		Input:        num(u["input_tokens"]),
+		Output:       num(u["output_tokens"]),
+		CacheRead:    num(u["cache_read_input_tokens"]),
+		CacheWrite:   num(u["cache_creation_input_tokens"]),
+		CacheWrite1h: num(asMap(u["cache_creation"])["ephemeral_1h_input_tokens"]),
 	}
 }
 

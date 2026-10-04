@@ -6,13 +6,13 @@ import { get, post } from '../lib/api'
 import { fmtAgo, fmtCompact } from '../lib/format'
 import { Badge, Button, Input, useAction } from '../components/ui'
 
-type Entry = { key: string; input_price?: number; output_price?: number; context_window?: number; max_output?: number; deprecation_date?: string; capabilities?: string[] }
+type Entry = { key: string; input_price?: number; output_price?: number; context_window?: number; max_output?: number; mode?: string; deprecation_date?: string; capabilities?: string[] }
 type Found = { id: string; provider_id: string; provider_name: string; provider_kind: string; upstream_model: string; display_name: string; first_seen: string; suggested_name: string; catalog?: Entry }
-type Suggestion = { model_id: string; model_name: string; upstream_model: string; reason: 'price_missing' | 'price_changed' | 'deprecated' | 'deprecating'; current: { input_price?: number; output_price?: number }; catalog: Entry }
-type Watch = { new: Found[]; suggestions: Suggestion[]; last_run?: { ran_at: string; providers: number; new_models: number; errors: string[] }; catalog_url: string; interval: string; catalog_models: number }
+type Notice = { model_id: string; model_name: string; upstream_model: string; provider_name: string; reason: 'deprecated' | 'deprecating'; catalog: Entry }
+type Watch = { new: Found[]; lifecycle: Notice[]; last_run?: { ran_at: string; providers: number; new_models: number; errors: string[] }; interval: string; catalog_models: number }
 
 const usd = (v?: number | null) => (v == null ? '—' : `$${+v.toFixed(4)}`)
-const reasonLabel = { price_missing: 'No price set', price_changed: 'Price changed', deprecated: 'Retired by provider', deprecating: 'Retiring soon' }
+const reasonLabel = { deprecated: 'Retired by provider', deprecating: 'Retiring soon' }
 
 // Model watch: new models from connected providers and catalog suggestions.
 // Shown to platform admins at the top of Models & routing.
@@ -23,11 +23,9 @@ export function ModelWatch() {
   const add = useAction((f: Found) => post<any>(`/api/model-watch/discoveries/${f.id}/add`, { name: names[f.id] ?? f.suggested_name }),
     { done: (r: any) => `Added ${r.model_name}${r.priced ? ' with catalog pricing' : ''}`, invalidate: [['model-watch'], ['models']] })
   const dismiss = useAction((f: Found) => post(`/api/model-watch/discoveries/${f.id}/dismiss`, {}), { done: 'Dismissed', invalidate: [['model-watch']] })
-  const apply = useAction((ids: string[]) => post<any>('/api/model-watch/apply-catalog', { model_ids: ids }), { done: (r: any) => `Updated prices for ${r.updated.length} model(s)`, invalidate: [['model-watch'], ['models']] })
   if (!w.data) return null
   const d = w.data
-  const priceable = d.suggestions.filter((s) => s.reason === 'price_missing' || s.reason === 'price_changed')
-  const lifecycle = d.suggestions.filter((s) => s.reason === 'deprecated' || s.reason === 'deprecating')
+  const lifecycle = d.lifecycle
   return (
     <section className="panel" style={{ marginBottom: 16, padding: 18 }}>
       <div className="row" style={{ alignItems: 'flex-start' }}>
@@ -35,7 +33,7 @@ export function ModelWatch() {
         <div style={{ flex: 1 }}>
           <h3 style={{ margin: 0 }}>Model watch</h3>
           <p className="muted" style={{ margin: '2px 0 0', fontSize: 12.5 }}>
-            Checks connected providers every {d.interval} for new models{d.catalog_url ? <> and prices them from a catalog of {fmtCompact(d.catalog_models)} models</> : ''}.
+            Checks connected providers every {d.interval} for new models and describes them from the price catalog ({fmtCompact(d.catalog_models)} models).
             {d.last_run ? <> Last checked {fmtAgo(d.last_run.ran_at)} across {d.last_run.providers} provider{d.last_run.providers === 1 ? '' : 's'}.</> : ' Not run yet.'}
           </p>
         </div>
@@ -60,18 +58,9 @@ export function ModelWatch() {
           </tbody>
         </table>
       )}
-      {priceable.length > 0 && (
-        <div className="callout" style={{ marginTop: 14, alignItems: 'center' }}>
-          <div style={{ flex: 1 }}>
-            <strong>{priceable.length} model{priceable.length > 1 ? 's' : ''} can be priced from the catalog.</strong>{' '}
-            <span className="muted">{priceable.slice(0, 4).map((s) => `${s.model_name} (${reasonLabel[s.reason].toLowerCase()}: ${usd(s.current.input_price)} → ${usd(s.catalog.input_price)})`).join(' · ')}{priceable.length > 4 ? ' …' : ''}</span>
-          </div>
-          <Button size="sm" busy={apply.isPending} onClick={() => apply.mutate(priceable.map((s) => s.model_id))}>Apply catalog prices</Button>
-        </div>
-      )}
       {lifecycle.length > 0 && (
         <div className="callout warn" style={{ marginTop: 10 }}>
-          <div>{lifecycle.map((s) => <div key={s.model_id + s.reason}><Badge tone="warn">{reasonLabel[s.reason]}</Badge> <span className="mono">{s.model_name}</span> <span className="muted">({s.upstream_model}, {s.catalog.deprecation_date})</span></div>)}
+          <div>{lifecycle.map((s) => <div key={s.model_id + s.reason}><Badge tone="warn">{reasonLabel[s.reason]}</Badge> <span className="mono">{s.model_name}</span> <span className="muted">({s.upstream_model} on {s.provider_name}, {s.catalog.deprecation_date})</span></div>)}
             <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>Start a rollout to a newer model now; aliases move every client in one change.</div></div>
         </div>
       )}

@@ -24,6 +24,7 @@ const People = lazy(() => import('./pages/People'))
 const SSO = lazy(() => import('./pages/SSO'))
 const Requests = lazy(() => import('./pages/Requests'))
 const Usage = lazy(() => import('./pages/Usage'))
+const Billing = lazy(() => import('./pages/Billing'))
 const Audit = lazy(() => import('./pages/Audit'))
 const Settings = lazy(() => import('./pages/Settings'))
 const PlatformUsers = lazy(() => import('./pages/PlatformUsers'))
@@ -66,6 +67,7 @@ function Authed() {
             <Route path="/sso" element={<SSO />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/usage" element={<Usage />} />
+            <Route path="/billing" element={<Billing />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/platform/users" element={<PlatformUsers />} />

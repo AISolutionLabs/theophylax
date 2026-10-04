@@ -32,6 +32,8 @@ type Config struct {
 	LogBufferSize     int
 	TrustedProxies    bool
 	RateLimitSync     time.Duration
+	PricingURL        string
+	PricingRefresh    time.Duration
 }
 
 func env(k, def string) string {
@@ -97,7 +99,9 @@ func Load() (*Config, error) {
 		LogBufferSize:     envInt("THEOPHYLAX_LOG_BUFFER", 20000),
 		TrustedProxies:    envBool("THEOPHYLAX_TRUST_PROXY_HEADERS", true),
 		// 0 disables fleet-wide sync (limits become per replica).
-		RateLimitSync: envDur("THEOPHYLAX_RATE_LIMIT_SYNC", 500*time.Millisecond),
+		RateLimitSync:  envDur("THEOPHYLAX_RATE_LIMIT_SYNC", 500*time.Millisecond),
+		PricingURL:     env("THEOPHYLAX_PRICING_URL", ""),
+		PricingRefresh: envDur("THEOPHYLAX_PRICING_REFRESH", 6*time.Hour),
 	}
 	mk := env("THEOPHYLAX_MASTER_KEY", "")
 	switch {

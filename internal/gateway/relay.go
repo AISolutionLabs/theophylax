@@ -271,7 +271,7 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(w, resp.Body)
 	}
 	st.log.InputTokens, st.log.OutputTokens, st.log.CacheReadTokens = usage.Input, usage.Output, usage.CacheRead
-	st.log.CostUSD = Cost(route.Model, usage)
+	st.log.CostUSD, st.log.PriceKey = g.Pricing.Cost(st.log.ProviderKind, usage, st.log.UpstreamModel)
 	g.finish(st)
 }
 

@@ -184,3 +184,30 @@ func (m *Mock) Embed(ctx context.Context, r *EmbedRequest) (*EmbedResult, error)
 	}
 	return &EmbedResult{Body: openAIEmbedBody(r.Model, vecs, tokens), InputTokens: tokens}, nil
 }
+
+// Forwarder is implemented by OpenAI-format providers for endpoints the
+// gateway relays without translation (Responses, images, audio, moderations).
+type Forwarder interface {
+	Forward(ctx context.Context, path, contentType string, body []byte, model string) (*http.Response, error)
+}
+
+// Forward sends a pre-built request body to path (e.g. "/responses").
+func (p *OpenAI) Forward(ctx context.Context, path, contentType string, body []byte, model string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint(model, path), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	p.applyHeaders(req)
+	if err := p.auth(ctx, req); err != nil {
+		return nil, err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}

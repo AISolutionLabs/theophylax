@@ -77,6 +77,9 @@ func (g *Gateway) authenticate(r *http.Request) (*auth.Principal, error) {
 		p, err = g.Resolver.FromIdPToken(ctx, tok, snap.IdPs)
 	case tok == "" && r.Header.Get("X-Theophylax-Client") == "web":
 		p, err = g.Resolver.FromSession(ctx, r) // console playground
+	case len(tok) >= 16:
+		// Keys imported from LiteLLM (sk-…) keep their original format.
+		return g.Resolver.FromKey(ctx, tok, "gateway")
 	default:
 		return nil, util.Err(401, "authentication_error", "missing or invalid API key (send x-api-key or Authorization: Bearer)")
 	}

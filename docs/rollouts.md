@@ -15,4 +15,16 @@ Automatic decisions (each one is written to the audit chain):
 
 Pause, resume, advance, promote or roll back manually from the console or `POST /api/rollouts/{id}/{action}`.
 
+## Rolling back a promotion
+
+A promoted rollout can be rolled back (console: **Roll back promotion**, or `POST /api/rollouts/{id}/rollback`). Promotion records the routing it replaced, so rolling back:
+
+- removes the deployment the promotion added;
+- restores every earlier deployment's priority, weight and on/off setting to what it was just before the promotion;
+- keeps deployments added after the promotion, unchanged.
+
+Clients keep calling the same model name. The rollout is marked rolled back, with who did it and when, and the change is written to the audit chain (`rollout.reverted`).
+
+Rollback is refused if a later rollout of the same model was promoted (roll that one back first), if another rollout of the model is in progress, or if it would leave the model with no enabled deployment. Rollouts promoted before this feature existed have no recorded routing; for them the promoted deployment is removed and the earlier deployments are moved back up the 10 priority levels promotion added.
+
 Shadow traffic costs money and sends (redacted) prompts to the candidate and judge providers — make sure both are approved for the data class. Shadow spend is tracked on the rollout, not on user budgets.

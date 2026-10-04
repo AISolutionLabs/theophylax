@@ -16,6 +16,7 @@ import (
 	"theophylax/internal/config"
 	"theophylax/internal/gateway"
 	"theophylax/internal/guardrails"
+	"theophylax/internal/pricing"
 	"theophylax/internal/receipts"
 	"theophylax/internal/secrets"
 	"theophylax/internal/store"
@@ -32,6 +33,7 @@ type API struct {
 	Guard   *guardrails.Engine
 	Budgets *gateway.Budgets
 	Signer  *receipts.Signer
+	Pricing *pricing.Catalog
 }
 
 type Ctx struct {
@@ -212,6 +214,9 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/providers/{id}", h(a.deleteProvider))
 	mux.HandleFunc("POST /api/providers/{id}/discover", h(a.discoverModels))
 	mux.HandleFunc("POST /api/providers/validate", h(a.validateConn))
+	mux.HandleFunc("DELETE /api/providers/{id}/oauth", h(a.providerOAuthDisconnect))
+	mux.HandleFunc("GET /auth/provider-oauth/{id}/start", a.providerOAuthStart)
+	mux.HandleFunc("GET /auth/provider-oauth/callback", a.providerOAuthCallback)
 	mux.HandleFunc("GET /api/models", h(a.listModels))
 	mux.HandleFunc("POST /api/models", h(a.createModel))
 	mux.HandleFunc("PATCH /api/models/{id}", h(a.updateModel))
@@ -220,6 +225,8 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/deployments/{id}", h(a.updateDeployment))
 	mux.HandleFunc("DELETE /api/deployments/{id}", h(a.deleteDeployment))
 	mux.HandleFunc("POST /api/models/import", h(a.importModels))
+	mux.HandleFunc("GET /api/pricing", h(a.pricingStatus))
+	mux.HandleFunc("POST /api/pricing/refresh", h(a.refreshPricing))
 
 	// Policy
 	mux.HandleFunc("GET /api/orgs/{org}/guardrails", h(a.listGuardrails))
@@ -229,6 +236,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/guardrails/test", h(a.testGuardrail))
 	mux.HandleFunc("GET /api/guardrails/catalog", h(a.guardrailCatalog))
 	mux.HandleFunc("GET /api/orgs/{org}/budgets", h(a.listBudgets))
+	mux.HandleFunc("GET /api/orgs/{org}/budgets/personal", h(a.personalBudgets))
 	mux.HandleFunc("POST /api/orgs/{org}/budgets", h(a.createBudget))
 	mux.HandleFunc("PATCH /api/budgets/{id}", h(a.updateBudget))
 	mux.HandleFunc("DELETE /api/budgets/{id}", h(a.deleteBudget))
@@ -263,6 +271,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/orgs/{org}/logs", h(a.listLogs))
 	mux.HandleFunc("GET /api/logs/{id}", h(a.getLog))
 	mux.HandleFunc("GET /api/orgs/{org}/usage", h(a.usage))
+	mux.HandleFunc("GET /api/orgs/{org}/billing", h(a.billing))
 	mux.HandleFunc("GET /api/orgs/{org}/audit", h(a.orgAudit))
 	mux.HandleFunc("GET /api/audit", h(a.platformAudit))
 	mux.HandleFunc("GET /api/audit/verify", h(a.verifyAudit))

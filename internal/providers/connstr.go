@@ -34,6 +34,7 @@ var kindAliases = map[string]string{
 	"azure-foundry": KindAzureFoundry, "azurefoundry": KindAzureFoundry, "foundry": KindAzureFoundry, "azure-anthropic": KindAzureFoundry, "azure_foundry": KindAzureFoundry,
 	"azure-openai": KindAzureOpenAI, "azureopenai": KindAzureOpenAI, "azure": KindAzureOpenAI, "azure_openai": KindAzureOpenAI,
 	"openai": KindOpenAI, "openai-compatible": KindOpenAI, "openai_compatible": KindOpenAI,
+	"custom": KindCustom, "custom-credential": KindCustom, "custom_credential": KindCustom,
 	"mock": KindMock,
 }
 
@@ -44,6 +45,7 @@ const (
 	KindAzureOpenAI  = "azure-openai"
 	KindOpenAI       = "openai"
 	KindMock         = "mock"
+	KindCustom       = "custom"
 )
 
 func normKey(k string) string {
@@ -79,6 +81,16 @@ func normKey(k string) string {
 		return "ca_bundle"
 	case "authorityhost":
 		return "authority_host"
+	case "tokenurl":
+		return "token_url"
+	case "refreshtoken":
+		return "refresh_token"
+	case "granttype":
+		return "grant_type"
+	case "authorizeurl":
+		return "authorize_url"
+	case "clientauth":
+		return "client_auth"
 	}
 	return k
 }
@@ -127,7 +139,7 @@ func ParseConn(s string) (*Conn, error) {
 		p := strings.ToLower(c.Params["provider"])
 		k, ok := kindAliases[p]
 		if !ok {
-			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|azure-foundry|azure-openai|openai>")
+			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|azure-foundry|azure-openai|openai|custom>")
 		}
 		c.Kind = k
 		delete(c.Params, "provider")
@@ -177,7 +189,7 @@ func resolveRefs(v string) string {
 	})
 }
 
-var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true}
+var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true, "refresh_token": true}
 
 // Redacted renders the connection with secret values masked (references are kept visible).
 func (c *Conn) Redacted() string {

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, type Me, type Org, type Role, ApiError } from './api'
 
@@ -68,17 +68,56 @@ function localStorageSet(k: string, v: string) {
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────
+// Appearance is a mode (light, dark, or follow the system) plus a palette.
+// It is stored per browser and applied before React renders to avoid a flash.
+export type ThemeMode = 'light' | 'dark' | 'system'
+export const PALETTES = [
+  { id: 'verdigris', label: 'Verdigris', swatch: '#0f8a78' },
+  { id: 'lapis', label: 'Lapis', swatch: '#2457c5' },
+  { id: 'porphyry', label: 'Porphyry', swatch: '#7a3e9d' },
+  { id: 'graphite', label: 'Graphite', swatch: '#3b4652' },
+  { id: 'contrast', label: 'High contrast', swatch: '#000000' },
+] as const
+export type Palette = (typeof PALETTES)[number]['id']
+
+const darkQuery = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-color-scheme: dark)') : undefined
+let appearance: { mode: ThemeMode; palette: Palette } = {
+  mode: (['light', 'dark', 'system'] as const).find((m) => m === localStorageGet('tpx.theme')) ?? 'system',
+  palette: PALETTES.find((p) => p.id === localStorageGet('tpx.palette'))?.id ?? 'verdigris',
+}
+const listeners = new Set<() => void>()
+const resolved = () => (appearance.mode === 'system' ? (darkQuery?.matches ? 'dark' : 'light') : appearance.mode)
+
+function applyAppearance() {
+  const root = document.documentElement
+  root.dataset.theme = resolved()
+  if (appearance.palette === 'verdigris') delete root.dataset.palette
+  else root.dataset.palette = appearance.palette
+}
+applyAppearance()
+darkQuery?.addEventListener?.('change', () => {
+  if (appearance.mode !== 'system') return
+  applyAppearance()
+  listeners.forEach((l) => l())
+})
+
+function setAppearance(next: Partial<typeof appearance>) {
+  appearance = { ...appearance, ...next }
+  localStorageSet('tpx.theme', appearance.mode)
+  localStorageSet('tpx.palette', appearance.palette)
+  applyAppearance()
+  listeners.forEach((l) => l())
+}
+
 export function useTheme() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorageGet('tpx.theme')
-    if (saved === 'light' || saved === 'dark') return saved
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  })
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorageSet('tpx.theme', theme)
-  }, [theme])
-  return { theme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')) }
+  const snap = useSyncExternalStore((l) => { listeners.add(l); return () => { listeners.delete(l) } }, () => `${appearance.mode}|${appearance.palette}|${resolved()}`)
+  const [mode, palette, theme] = snap.split('|') as [ThemeMode, Palette, 'light' | 'dark']
+  return {
+    theme, mode, palette,
+    setMode: (m: ThemeMode) => setAppearance({ mode: m }),
+    setPalette: (p: Palette) => setAppearance({ palette: p }),
+    toggle: () => setAppearance({ mode: theme === 'dark' ? 'light' : 'dark' }),
+  }
 }
 
 // ── Toasts ────────────────────────────────────────────────────────────────

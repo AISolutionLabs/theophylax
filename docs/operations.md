@@ -20,6 +20,8 @@
 | `THEOPHYLAX_RECEIPT_SEED` | derived | Explicit Ed25519 seed (base64) |
 | `THEOPHYLAX_RECEIPT_CHECKPOINT_INTERVAL` | `2m` | Merkle anchoring interval |
 | `THEOPHYLAX_TRUST_PROXY_HEADERS` | `true` | Use `X-Forwarded-For` for client IPs |
+| `THEOPHYLAX_PRICING_URL` | LiteLLM catalog on GitHub | Upstream price catalog (`https://…`, `file:///path` for an air-gapped mirror, or `off` to use only the stored copy) |
+| `THEOPHYLAX_PRICING_REFRESH` | `6h` | How often the price catalog is re-fetched |
 | `HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE` | | Standard egress settings; per-provider `proxy=` and `ca_bundle=` override |
 
 ## Endpoints
@@ -44,3 +46,19 @@ Back up Postgres (logs, receipts and audit are your evidence) and the master key
 - Session cookies are HttpOnly, SameSite=Lax and Secure on HTTPS; cookie-authenticated mutations require a custom header (CSRF).
 - The console sends a strict Content-Security-Policy; containers run non-root with a read-only root filesystem.
 - Every control-plane change, sign-in (including failures), payload view, SCIM action and rollout decision is in the hash-chained audit log.
+
+## Pricing
+
+Spend, dollar budgets, receipts and the **Billing** page use the upstream providers' published list prices, never admin-entered values. At startup and every `THEOPHYLAX_PRICING_REFRESH`, the gateway fetches a machine-readable catalog ([LiteLLM's `model_prices_and_context_window.json`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) by default) and stores it in Postgres. Replicas without internet egress, and restarts, use the stored copy. If a refresh fails, the previous prices stay in use and the error appears under Billing → Price source. Platform admins can force a refresh there or with `POST /api/pricing/refresh`.
+
+Each request is priced when it completes, using the provider kind and upstream model ID of the deployment that served it (after failover). Each token type is billed at its own catalog rate, and long-context tiers apply when the prompt crosses their threshold. The matched catalog entry is recorded on the request log as `price_key`. Requests whose model is not in the catalog are recorded at $0 with an empty `price_key`, and Billing lists them as unpriced. Costs already recorded are not recalculated when prices change later.
+
+## Budgets
+
+Budgets are either **pooled** (one cap on the combined spend of an org, team, project or key) or **per-person**. A person's own limit for each period (daily, monthly, all time) is the first of these that exists:
+
+1. their personal budget (`scope_type=user`), measured on their spend in the organization;
+2. their team's per-person budget (`scope_type=team`, `per_user=true`), measured on their spend in that team;
+3. the organization's per-person budget (`scope_type=org`, `per_user=true`), measured on their spend in the organization.
+
+Pooled budgets still apply on top, so an organization total still stops everyone. Requests made with service keys that belong to no person are only limited by pooled budgets.

@@ -254,7 +254,7 @@ func (l *Loader) Load(ctx context.Context) error {
 			if pc.TimeoutSeconds > 0 {
 				to = time.Duration(pc.TimeoutSeconds) * time.Second
 			}
-			pp, err := providers.New(conn, providers.Options{ID: p.ID, Timeout: to, DropParams: pc.DropParams, Headers: pc.Headers})
+			pp, err := providers.New(conn, providers.Options{ID: p.ID, Timeout: to, DropParams: pc.DropParams, Headers: pc.Headers, Tokens: &tokenStore{st: l.st, box: l.box}})
 			if err != nil {
 				e.Err = err.Error()
 			} else {

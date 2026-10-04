@@ -54,9 +54,14 @@ type Rollout struct {
 	CanaryLatencyMS     int64      `db:"canary_latency_ms" json:"canary_latency_ms"`
 	DecisionNote        string     `db:"decision_note" json:"decision_note"`
 	DecidedAt           *time.Time `db:"decided_at" json:"decided_at"`
-	CreatedBy           *string    `db:"created_by" json:"created_by"`
-	CreatedAt           time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt           time.Time  `db:"updated_at" json:"updated_at"`
+	// Set on promotion so the promotion can be rolled back.
+	PromotedDeploymentID *string         `db:"promoted_deployment_id" json:"promoted_deployment_id"`
+	RoutingBefore        json.RawMessage `db:"routing_before" json:"routing_before"`
+	RevertedAt           *time.Time      `db:"reverted_at" json:"reverted_at"`
+	RevertedBy           *string         `db:"reverted_by" json:"reverted_by"`
+	CreatedBy            *string         `db:"created_by" json:"created_by"`
+	CreatedAt            time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time       `db:"updated_at" json:"updated_at"`
 }
 
 // activeRollout is the snapshot view used on the hot path.
@@ -136,6 +141,7 @@ type shadowJob struct {
 	incText    string
 	incLatency time.Duration
 	incUsage   providers.Usage
+	incCost    float64
 }
 
 // runShadow mirrors a completed request to the candidate and asks the judge.
@@ -160,10 +166,16 @@ func (g *Gateway) runShadow(j *shadowJob) {
 	sample := map[string]any{"verdict": "error"}
 	var candText string
 	var candUsage providers.Usage
+	var candModel string
 	if err == nil {
 		raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 		resp.Body.Close()
 		if rerr == nil {
+			var served struct {
+				Model string `json:"model"`
+			}
+			_ = json.Unmarshal(raw, &served)
+			candModel = served.Model
 			if prov.Format() == providers.FormatOpenAI {
 				raw, candUsage, _ = providers.OpenAIToAnthropicResponse(raw, j.ro.CandidateUpstream)
 			}
@@ -176,8 +188,8 @@ func (g *Gateway) runShadow(j *shadowJob) {
 			}
 		}
 	}
-	candCost := Cost(j.model, candUsage)
-	incCost := Cost(j.model, j.incUsage)
+	candCost, _ := g.Pricing.Cost(prov.Kind(), candUsage, j.ro.CandidateUpstream, candModel)
+	incCost := j.incCost
 	reason := ""
 	switch {
 	case err != nil:
@@ -382,16 +394,22 @@ func PromoteRollout(ctx context.Context, st *store.Store, al *audit.Logger, id s
 			return util.Err(409, "conflict_error", "rollout already finished")
 		}
 		modelID = r.ModelID
+		var before []routeState
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(json_agg(json_build_object('id', id, 'priority', priority, 'weight', weight, 'enabled', enabled) ORDER BY priority), '[]') FROM deployments WHERE model_id=$1`, r.ModelID).Scan(&before); err != nil {
+			return err
+		}
 		var minPri int
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(min(priority),0) FROM deployments WHERE model_id=$1`, r.ModelID).Scan(&minPri)
 		if _, err := tx.Exec(ctx, `UPDATE deployments SET priority=priority+10 WHERE model_id=$1`, r.ModelID); err != nil {
 			return err
 		}
+		depID := util.NewID("dep")
 		if _, err := tx.Exec(ctx, `INSERT INTO deployments (id, model_id, provider_id, upstream_model, weight, priority, enabled) VALUES ($1,$2,$3,$4,1,$5,true)`,
-			util.NewID("dep"), r.ModelID, r.CandidateProviderID, r.CandidateUpstream, minPri); err != nil {
+			depID, r.ModelID, r.CandidateProviderID, r.CandidateUpstream, minPri); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE model_rollouts SET stage='promoted', decision_note=$2, decided_at=now(), updated_at=now() WHERE id=$1`, id, note)
+		snap, _ := json.Marshal(before)
+		_, err := tx.Exec(ctx, `UPDATE model_rollouts SET stage='promoted', decision_note=$2, decided_at=now(), updated_at=now(), promoted_deployment_id=$3, routing_before=$4 WHERE id=$1`, id, note, depID, snap)
 		return err
 	})
 	if err != nil {
@@ -399,4 +417,101 @@ func PromoteRollout(ctx context.Context, st *store.Store, al *audit.Logger, id s
 	}
 	al.Record(ctx, audit.Event{Actor: actor, Action: "rollout.promoted", TargetType: "rollout", TargetID: id, Details: map[string]any{"model_id": modelID, "note": note}})
 	return nil
+}
+
+// routeState is one deployment's routing settings, recorded at promotion.
+type routeState struct {
+	ID       string `json:"id"`
+	Priority int    `json:"priority"`
+	Weight   int    `json:"weight"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// RevertResult describes what rolling back a promotion changed.
+type RevertResult struct {
+	RemovedDeployment string `json:"removed_deployment,omitempty"`
+	Restored          int    `json:"restored"`
+	KeptNewer         int    `json:"kept_newer"`
+}
+
+// RevertPromotion rolls back a promoted rollout: it removes the deployment the
+// promotion added and restores the model's routing (priority, weight, enabled)
+// to what it was just before. Deployments added since are left in place.
+// Only a model's latest promotion can be rolled back, and not while another
+// rollout for the model is running.
+func RevertPromotion(ctx context.Context, st *store.Store, al *audit.Logger, id string, actor audit.Actor, note string) (*RevertResult, error) {
+	res := &RevertResult{}
+	var r Rollout
+	err := st.Tx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT model_id, stage, candidate_provider_id, candidate_upstream, decided_at, promoted_deployment_id, routing_before FROM model_rollouts WHERE id=$1 FOR UPDATE`, id).
+			Scan(&r.ModelID, &r.Stage, &r.CandidateProviderID, &r.CandidateUpstream, &r.DecidedAt, &r.PromotedDeploymentID, &r.RoutingBefore); err != nil {
+			return util.ErrNotFound
+		}
+		if r.Stage != "promoted" || r.DecidedAt == nil {
+			return util.Err(409, "conflict_error", "only a promoted rollout can be rolled back this way")
+		}
+		// Serialise with other rollout changes for the same model.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM models WHERE id=$1 FOR UPDATE`, r.ModelID); err != nil {
+			return err
+		}
+		var newer, active bool
+		_ = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rollouts WHERE model_id=$1 AND id<>$2 AND stage='promoted' AND decided_at > $3)`, r.ModelID, id, *r.DecidedAt).Scan(&newer)
+		if newer {
+			return util.Err(409, "conflict_error", "a later rollout for this model was promoted after this one; roll that one back first")
+		}
+		_ = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rollouts WHERE model_id=$1 AND stage IN ('shadow','canary','paused'))`, r.ModelID).Scan(&active)
+		if active {
+			return util.Err(409, "conflict_error", "another rollout for this model is in progress; finish or roll it back first")
+		}
+
+		// The deployment the promotion added. Rollouts promoted before this
+		// was recorded are matched by candidate and promotion time.
+		depID := util.Deref(r.PromotedDeploymentID)
+		if depID == "" {
+			_ = tx.QueryRow(ctx, `SELECT id FROM deployments WHERE model_id=$1 AND provider_id=$2 AND upstream_model=$3 AND created_at=$4 LIMIT 1`,
+				r.ModelID, r.CandidateProviderID, r.CandidateUpstream, *r.DecidedAt).Scan(&depID)
+		}
+
+		var before []routeState
+		if len(r.RoutingBefore) > 0 && json.Unmarshal(r.RoutingBefore, &before) == nil {
+			for _, d := range before {
+				tag, err := tx.Exec(ctx, `UPDATE deployments SET priority=$3, weight=$4, enabled=$5 WHERE id=$1 AND model_id=$2`, d.ID, r.ModelID, d.Priority, d.Weight, d.Enabled)
+				if err != nil {
+					return err
+				}
+				res.Restored += int(tag.RowsAffected())
+			}
+		} else {
+			// Legacy promotion: it pushed every earlier deployment down by 10.
+			tag, err := tx.Exec(ctx, `UPDATE deployments SET priority=priority-10 WHERE model_id=$1 AND created_at < $2 AND id<>$3`, r.ModelID, *r.DecidedAt, depID)
+			if err != nil {
+				return err
+			}
+			res.Restored = int(tag.RowsAffected())
+		}
+		if depID != "" {
+			tag, err := tx.Exec(ctx, `DELETE FROM deployments WHERE id=$1 AND model_id=$2`, depID, r.ModelID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() > 0 {
+				res.RemovedDeployment = depID
+			}
+		}
+		_ = tx.QueryRow(ctx, `SELECT count(*) FROM deployments WHERE model_id=$1 AND created_at > $2`, r.ModelID, *r.DecidedAt).Scan(&res.KeptNewer)
+
+		var routable int
+		_ = tx.QueryRow(ctx, `SELECT count(*) FROM deployments WHERE model_id=$1 AND enabled`, r.ModelID).Scan(&routable)
+		if routable == 0 {
+			return util.Err(409, "conflict_error", "rolling back would leave this model with no enabled deployment; the routes it replaced have since been removed or disabled")
+		}
+		_, err := tx.Exec(ctx, `UPDATE model_rollouts SET stage='rolled_back', decision_note=$2, reverted_at=now(), reverted_by=$3, updated_at=now() WHERE id=$1`, id, note, actor.Email)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	al.Record(ctx, audit.Event{Actor: actor, Action: "rollout.reverted", TargetType: "rollout", TargetID: id,
+		Details: map[string]any{"model_id": r.ModelID, "candidate": r.CandidateUpstream, "removed_deployment": res.RemovedDeployment, "restored": res.Restored, "kept_newer": res.KeptNewer, "note": note}})
+	return res, nil
 }

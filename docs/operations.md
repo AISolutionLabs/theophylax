@@ -38,6 +38,24 @@ On 2 shared vCPUs with Postgres, the load generator and a zero-latency mock upst
 
 Back up Postgres (logs, receipts and audit are your evidence) and the master key separately. To rotate the master key, re-enter provider and IdP credentials after switching. To rotate the receipt key, set a new `THEOPHYLAX_RECEIPT_SEED` and keep publishing the old public key alongside for verification of older receipts.
 
+## Recovering a locked-out account
+
+If an admin loses their password, reset it from wherever the gateway runs. The command talks to Postgres directly, so nobody needs to be signed in:
+
+```bash
+# Generates a new password and prints it on stdout
+theophylax reset-password -email admin@example.com
+
+# Or set one yourself (at least 12 characters)
+echo 'new-password-here' | theophylax reset-password -email admin@example.com -password-stdin
+
+# Kubernetes / Compose
+kubectl exec -n theophylax deploy/theophylax -- theophylax reset-password -email admin@example.com
+docker compose exec theophylax theophylax reset-password -email admin@example.com
+```
+
+It needs `THEOPHYLAX_DATABASE_URL` (already set inside the gateway's container). It reactivates a suspended account unless you pass `-keep-status`, and `-platform-admin` also restores platform-admin rights if the last admin was demoted. Every reset is written to the audit log as `auth.password_reset`. Existing browser sessions stay valid until they expire; rotate the session signing key if you need to end them all.
+
 ## Security notes
 
 - Credentials are encrypted at rest (AES-256-GCM); secrets are never returned by the API.

@@ -22,6 +22,7 @@ type OpenAI struct {
 	apiVersion string
 	apiKey     string
 	token      *azureToken
+	gtoken     *googleToken
 }
 
 func newOpenAI(b baseProvider, c *Conn) (*OpenAI, error) {
@@ -74,6 +75,14 @@ func (p *OpenAI) endpoint(model, path string) string {
 }
 
 func (p *OpenAI) auth(ctx context.Context, req *http.Request) error {
+	if p.gtoken != nil {
+		t, err := p.gtoken.Get(ctx)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+t)
+		return nil
+	}
 	if p.token != nil {
 		t, err := p.token.Get(ctx)
 		if err != nil {

@@ -48,7 +48,7 @@ export const initials = (s: string) =>
   s.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join('')
 
 export const kindLabel: Record<string, string> = {
-  anthropic: 'Anthropic', bedrock: 'AWS Bedrock', 'azure-foundry': 'Azure AI Foundry', 'azure-openai': 'Azure OpenAI', openai: 'OpenAI-compatible', mock: 'Built-in mock',
+  anthropic: 'Anthropic', bedrock: 'AWS Bedrock', 'azure-foundry': 'Azure AI Foundry', 'azure-openai': 'Azure OpenAI', vertex: 'Claude on Vertex AI', 'vertex-openai': 'Vertex AI (Gemini)', gemini: 'Google Gemini', openai: 'OpenAI-compatible', mock: 'Built-in mock',
   skill: 'Skill', mcp_server: 'MCP server', agent: 'Agent template', prompt: 'Prompt', plugin: 'Plugin',
 }
 

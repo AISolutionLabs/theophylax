@@ -8,7 +8,7 @@ import { fmtAgo, kindLabel } from '../lib/format'
 import { Badge, Button, Confirm, Drawer, Empty, ErrorNote, Field, Input, Loading, PageHead, Segmented, Select, Tabs, Textarea, Toggle, useAction } from '../components/ui'
 import { DiscoverDrawer } from './Models'
 
-type Kind = 'anthropic' | 'bedrock' | 'azure-foundry' | 'azure-openai' | 'openai'
+type Kind = 'anthropic' | 'bedrock' | 'vertex' | 'azure-foundry' | 'azure-openai' | 'vertex-openai' | 'gemini' | 'openai'
 
 // Each provider kind offers its auth methods and the fields each needs.
 const KINDS: Record<Kind, { host: string; hostLabel: string; hostHint: string; auths: { value: string; label: string; fields: string[] }[] }> = {
@@ -21,8 +21,14 @@ const KINDS: Record<Kind, { host: string; hostLabel: string; hostHint: string; a
     { value: 'pod_identity', label: 'EKS Pod Identity', fields: [] },
     { value: 'default', label: 'Default credential chain', fields: [] },
     { value: 'assume_role', label: 'Assume role (cross-account)', fields: ['role_arn', 'external_id'] },
+    { value: 'entra', label: 'Entra ID federation (Azure workload identity → IAM role)', fields: ['role_arn', 'audience', 'entra_auth', 'tenant_id', 'client_id'] },
     { value: 'static', label: 'Access keys', fields: ['access_key_id', 'secret_access_key', 'session_token'] },
     { value: 'api_key', label: 'Bedrock API key', fields: ['api_key'] },
+  ] },
+  vertex: { host: 'us-east5', hostLabel: 'Region', hostHint: 'Claude on Vertex AI: us-east5, europe-west1, global…', auths: [
+    { value: 'workload_identity', label: 'Workload identity federation (EKS, AKS…)', fields: ['project', 'audience', 'token_file', 'service_account'] },
+    { value: 'metadata', label: 'GKE workload identity / metadata server', fields: ['project'] },
+    { value: 'service_account', label: 'Service account key', fields: ['project', 'credentials'] },
   ] },
   'azure-foundry': { host: '', hostLabel: 'Resource', hostHint: 'Your Foundry resource, e.g. my-ai.services.ai.azure.com', auths: [
     { value: 'api_key', label: 'API key', fields: ['api_key'] },
@@ -36,16 +42,25 @@ const KINDS: Record<Kind, { host: string; hostLabel: string; hostHint: string; a
     { value: 'workload', label: 'Workload identity federation', fields: ['tenant_id', 'client_id', 'api_version'] },
     { value: 'managed', label: 'Managed identity', fields: ['client_id', 'api_version'] },
   ] },
-  openai: { host: 'api.openai.com', hostLabel: 'Host', hostHint: 'Any OpenAI-compatible endpoint (vLLM, Ollama, LM Studio…).', auths: [
+  'vertex-openai': { host: 'us-central1', hostLabel: 'Region', hostHint: 'Gemini and partner models on Vertex AI (model IDs like google/gemini-2.5-pro).', auths: [
+    { value: 'workload_identity', label: 'Workload identity federation (EKS, AKS…)', fields: ['project', 'audience', 'token_file', 'service_account'] },
+    { value: 'metadata', label: 'GKE workload identity / metadata server', fields: ['project'] },
+    { value: 'service_account', label: 'Service account key', fields: ['project', 'credentials'] },
+  ] },
+  gemini: { host: 'generativelanguage.googleapis.com', hostLabel: 'Host', hostHint: 'Google AI Studio (Gemini API).', auths: [
+    { value: 'api_key', label: 'API key', fields: ['api_key'] },
+  ] },
+  openai: { host: 'api.openai.com', hostLabel: 'Host', hostHint: 'Any OpenAI-compatible endpoint. Shorthands also work as connection strings: groq://, mistral://, together://, deepseek://, xai://, openrouter://, ollama://host:11434, vllm://host:8000.', auths: [
     { value: 'api_key', label: 'API key', fields: ['api_key', 'base_url'] },
   ] },
 }
 
 const FIELD_LABEL: Record<string, string> = {
   api_key: 'API key', auth_token: 'Token', role_arn: 'Role ARN', external_id: 'External ID', access_key_id: 'Access key ID', secret_access_key: 'Secret access key',
-  session_token: 'Session token (optional)', tenant_id: 'Tenant ID', client_id: 'Client ID', client_secret: 'Client secret', api_version: 'API version', base_url: 'Base URL (optional)',
+  session_token: 'Session token (optional)', project: 'Google Cloud project', audience: 'Audience', token_file: 'Token file', service_account: 'Impersonate service account (optional)',
+  credentials: 'Service account key (path or ${file:…})', entra_auth: 'Entra auth (workload, managed or entra)', tenant_id: 'Tenant ID', client_id: 'Client ID', client_secret: 'Client secret', api_version: 'API version', base_url: 'Base URL (optional)',
 }
-const SECRET = new Set(['api_key', 'auth_token', 'secret_access_key', 'session_token', 'client_secret'])
+const SECRET = new Set(['api_key', 'auth_token', 'secret_access_key', 'session_token', 'client_secret', 'credentials'])
 
 export default function Providers() {
   const { isPlatformAdmin } = useApp()
@@ -60,7 +75,7 @@ export default function Providers() {
         actions={<Button variant="primary" onClick={() => setEditing('new')}><Plus size={15} /> Connect provider</Button>} />
       <div className="panel">
         {providers.isLoading ? <Loading /> : providers.error ? <ErrorNote error={providers.error} /> : !providers.data?.length ? (
-          <Empty icon={<Plug size={20} />} title="No providers connected" action={<Button variant="primary" onClick={() => setEditing('new')}>Connect provider</Button>}>Connect Anthropic, AWS Bedrock, Azure AI Foundry, Azure OpenAI or any OpenAI-compatible endpoint.</Empty>
+          <Empty icon={<Plug size={20} />} title="No providers connected" action={<Button variant="primary" onClick={() => setEditing('new')}>Connect provider</Button>}>Connect Anthropic, AWS Bedrock, Google Vertex AI, Gemini, Azure AI Foundry, Azure OpenAI or any OpenAI-compatible endpoint.</Empty>
         ) : (
           <table className="tbl">
             <thead><tr><th>Provider</th><th>Type</th><th>Connection</th><th>Scope</th><th className="num">Models</th><th>Status</th><th /></tr></thead>
@@ -73,7 +88,7 @@ export default function Providers() {
                   <td>{p.org_id ? <Badge>this organization</Badge> : <Badge tone="accent">platform-wide</Badge>}</td>
                   <td className="num">{p.deployment_count}</td>
                   <td>{p.status === 'ready' ? <Badge tone="ok">ready</Badge> : p.status === 'disabled' ? <Badge>disabled</Badge> : <Badge tone="bad" title={p.error}>error</Badge>}</td>
-                  <td className="tight" onClick={(e) => e.stopPropagation()}>{p.can_manage && p.status === 'ready' && p.kind !== 'azure-foundry' && <Button size="sm" onClick={() => setDiscover(p)}><Search size={13} /> Discover models</Button>}</td>
+                  <td className="tight" onClick={(e) => e.stopPropagation()}>{p.can_manage && p.status === 'ready' && p.kind !== 'azure-foundry' && p.kind !== 'vertex' && <Button size="sm" onClick={() => setDiscover(p)}><Search size={13} /> Discover models</Button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -89,7 +104,7 @@ export default function Providers() {
 
 function buildConn(kind: Kind, host: string, auth: string, fields: Record<string, string>, proxy: string, caBundle: string, endpoint: string) {
   const q = new URLSearchParams()
-  if (!(kind === 'anthropic' && auth === 'api_key') && !(kind === 'openai')) q.set('auth', auth)
+  if (!(kind === 'anthropic' && auth === 'api_key') && kind !== 'openai' && kind !== 'gemini') q.set('auth', auth)
   for (const f of KINDS[kind].auths.find((a) => a.value === auth)?.fields ?? []) if (fields[f]) q.set(f, fields[f]!)
   if (proxy) q.set('proxy', proxy)
   if (caBundle) q.set('ca_bundle', caBundle)

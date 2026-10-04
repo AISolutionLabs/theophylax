@@ -50,6 +50,7 @@ func (g *Gateway) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/agents/{agent}/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		g.inference(w, r, providers.FormatOpenAI, r.PathValue("agent"))
 	})
+	mux.HandleFunc("POST /v1/embeddings", g.embeddings)
 	mux.HandleFunc("POST /v1/messages/count_tokens", g.countTokens)
 	mux.HandleFunc("GET /v1/models", g.listModels)
 	mux.HandleFunc("GET /v1/whoami", g.whoami)

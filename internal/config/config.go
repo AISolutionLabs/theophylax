@@ -31,6 +31,7 @@ type Config struct {
 	DBMaxConns        int32
 	LogBufferSize     int
 	TrustedProxies    bool
+	RateLimitSync     time.Duration
 }
 
 func env(k, def string) string {
@@ -95,6 +96,8 @@ func Load() (*Config, error) {
 		DBMaxConns:        int32(envInt("THEOPHYLAX_DB_MAX_CONNS", 20)),
 		LogBufferSize:     envInt("THEOPHYLAX_LOG_BUFFER", 20000),
 		TrustedProxies:    envBool("THEOPHYLAX_TRUST_PROXY_HEADERS", true),
+		// 0 disables fleet-wide sync (limits become per replica).
+		RateLimitSync: envDur("THEOPHYLAX_RATE_LIMIT_SYNC", 500*time.Millisecond),
 	}
 	mk := env("THEOPHYLAX_MASTER_KEY", "")
 	switch {

@@ -184,6 +184,16 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("openai stream: %d %s", code, raw)
 	}
 
+	// --- Embeddings through the same pipeline -----------------------------
+	code, body, raw, hdr = gw(t, ts.URL, bobKey, "/v1/embeddings", map[string]any{"model": "m1", "input": []any{"first text", "second text"}})
+	if code != 200 || len(body["data"].([]any)) != 2 || hdr.Get("X-Theophylax-Receipt") == "" {
+		t.Fatalf("embeddings: %d %s", code, raw)
+	}
+	code, _, raw, _ = gw(t, ts.URL, bobKey, "/v1/embeddings", map[string]any{"model": "m1"})
+	if code != 400 {
+		t.Fatalf("embeddings without input: %d %s", code, raw)
+	}
+
 	// --- Guardrails: project-scoped deny-list ----------------------------
 	root.must("POST", "/api/orgs/"+org+"/guardrails", map[string]any{"name": "codename", "scope_type": "project", "scope_id": proj,
 		"rules": []any{map[string]any{"type": "keywords", "words": []string{"bluebird"}, "action": "block"}}}, 201)

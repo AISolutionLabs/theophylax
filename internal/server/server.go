@@ -85,7 +85,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	if err != nil {
 		return nil, err
 	}
-	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewRateLimiter(), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al}
+	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al}
 	guard.Judge = gw.Judge
 	api.Version = version
 	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer}
@@ -98,6 +98,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	go loader.Run(bg, pool)
 	go budgets.Run(bg)
 	go logs.Run(bg)
+	go gw.RL.Run(bg)
 	go gateway.Retention(bg, st, cfg.RetentionDays)
 	ckEvery := 2 * time.Minute
 	if d, err := time.ParseDuration(os.Getenv("THEOPHYLAX_RECEIPT_CHECKPOINT_INTERVAL")); err == nil && d > 0 {

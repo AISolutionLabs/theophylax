@@ -79,10 +79,23 @@ func stsEndpoint(region string) string {
 type webIdentityCreds struct {
 	roleARN, tokenFile, session, region string
 	client                              *http.Client
+	// tokenFn, when set, supplies the web identity token instead of tokenFile
+	// (e.g. an Entra ID access token for cross-cloud federation).
+	tokenFn func(ctx context.Context) (string, error)
+	// endpoint overrides the regional STS endpoint (e.g. an STS VPC endpoint).
+	endpoint string
 }
 
 func (w *webIdentityCreds) Retrieve(ctx context.Context) (AWSCreds, error) {
-	tok, err := os.ReadFile(w.tokenFile)
+	var tok []byte
+	var err error
+	if w.tokenFn != nil {
+		var s string
+		s, err = w.tokenFn(ctx)
+		tok = []byte(s)
+	} else {
+		tok, err = os.ReadFile(w.tokenFile)
+	}
 	if err != nil {
 		return AWSCreds{}, fmt.Errorf("web identity token: %w", err)
 	}
@@ -90,7 +103,11 @@ func (w *webIdentityCreds) Retrieve(ctx context.Context) (AWSCreds, error) {
 		"Action": {"AssumeRoleWithWebIdentity"}, "Version": {"2011-06-15"},
 		"RoleArn": {w.roleARN}, "RoleSessionName": {w.session}, "WebIdentityToken": {strings.TrimSpace(string(tok))},
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, stsEndpoint(w.region), strings.NewReader(q.Encode()))
+	ep := w.endpoint
+	if ep == "" {
+		ep = stsEndpoint(w.region)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ep, strings.NewReader(q.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	var out struct {
 		Result stsResult `xml:"AssumeRoleWithWebIdentityResult"`
@@ -280,7 +297,7 @@ func sessionName() string {
 
 // awsCredsFromConn picks a credential source by auth=
 //
-//	default | irsa | pod_identity | instance | static | assume_role
+//	default | irsa | entra | pod_identity | instance | static | assume_role
 func awsCredsFromConn(c *Conn, region string, client *http.Client) (awsCredSource, error) {
 	auth := c.Params["auth"]
 	var base awsCredSource
@@ -299,7 +316,37 @@ func awsCredsFromConn(c *Conn, region string, client *http.Client) (awsCredSourc
 		if arn == "" || tf == "" {
 			return nil, errors.New("irsa: role_arn/AWS_ROLE_ARN and token_file/AWS_WEB_IDENTITY_TOKEN_FILE are required")
 		}
-		return &cachedCreds{src: &webIdentityCreds{roleARN: arn, tokenFile: tf, session: sessionName(), region: region, client: client}}, nil
+		return &cachedCreds{src: &webIdentityCreds{roleARN: arn, tokenFile: tf, session: sessionName(), region: region, client: client, endpoint: c.Get("sts_endpoint")}}, nil
+	case "entra", "entra_federation", "azure_federation", "azure":
+		// Cross-cloud: get an Entra ID token (workload identity on AKS/EKS,
+		// managed identity, or a client secret) and exchange it with STS for
+		// the target role. The IAM role trusts sts.windows.net/<tenant> as an
+		// OIDC provider with the Entra app ID URI as audience.
+		arn := c.Get("role_arn")
+		if arn == "" {
+			return nil, errors.New("entra federation requires role_arn")
+		}
+		ac := &Conn{Kind: KindAzureOpenAI, Params: map[string]string{}}
+		for k, v := range c.Params {
+			ac.Params[k] = v
+		}
+		ac.Params["auth"] = c.Params["entra_auth"]
+		if ac.Params["scope"] == "" {
+			aud := c.Get("audience")
+			if aud == "" {
+				return nil, errors.New("entra federation requires audience (the Entra application ID URI, e.g. api://bedrock-federation) or scope")
+			}
+			ac.Params["scope"] = strings.TrimSuffix(aud, "/") + "/.default"
+		}
+		ac.Params["api_key"] = ""
+		_, at, err := newAzureAuth(ac, client)
+		if err != nil {
+			return nil, err
+		}
+		if at == nil {
+			return nil, errors.New("entra federation needs a token-based entra_auth (workload, managed or entra)")
+		}
+		return &cachedCreds{src: &webIdentityCreds{roleARN: arn, session: sessionName(), region: region, client: client, tokenFn: at.Get, endpoint: c.Get("sts_endpoint")}}, nil
 	case "pod_identity", "container":
 		base = containerCreds{}
 	case "instance", "imds":

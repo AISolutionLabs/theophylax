@@ -1,0 +1,10 @@
+model_list:
+  - model_name: fast
+    litellm_params:
+      model: openai/fast
+      api_base: http://127.0.0.1:9000/v1
+      api_key: x
+general_settings:
+  master_key: sk-bench-1234
+litellm_settings:
+  telemetry: false

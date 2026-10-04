@@ -96,6 +96,7 @@ The chart ships HPA, PDB, zone spread, non-root read-only pods, optional Service
 - [Identity: SSO, SCIM & RBAC](docs/identity.md)
 - [Configuration & operations](docs/operations.md)
 - [API reference](docs/api.md)
+- [Benchmarks vs LiteLLM and Portkey](bench/README.md)
 
 ## Development
 

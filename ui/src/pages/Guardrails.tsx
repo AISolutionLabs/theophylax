@@ -22,6 +22,10 @@ const ruleSummary = (r: Rule) => {
     case 'max_input_chars': return `reject prompts over ${r.max?.toLocaleString()} characters`
     case 'webhook': return `ask ${r.url}`
     case 'bedrock_guardrail': return `Bedrock guardrail ${r.guardrail_id}`
+    case 'lakera': return 'block what Lakera Guard flags'
+    case 'azure_prompt_shield': return 'block prompt attacks Azure Prompt Shields detects'
+    case 'azure_content_safety': return `block harmful content at severity ≥ ${r.max ?? 4}`
+    case 'openai_moderation': return 'block what OpenAI moderation flags'
   }
   return r.type
 }
@@ -128,6 +132,10 @@ const defaultRule = (type: string): Rule => {
     case 'max_input_chars': return { type, max: 400000 }
     case 'webhook': return { type, url: '', timeout_ms: 1500, fail_open: true, apply_to: 'input' }
     case 'bedrock_guardrail': return { type, provider_id: '', guardrail_id: '', version: 'DRAFT', apply_to: 'input' }
+    case 'lakera': return { type, api_key: '${env:LAKERA_API_KEY}', apply_to: 'input', timeout_ms: 1500, fail_open: true }
+    case 'azure_prompt_shield': return { type, url: 'https://', api_key: '${env:AZURE_CONTENT_SAFETY_KEY}', apply_to: 'input', timeout_ms: 1500, fail_open: true }
+    case 'azure_content_safety': return { type, url: 'https://', api_key: '${env:AZURE_CONTENT_SAFETY_KEY}', max: 4, apply_to: 'both', timeout_ms: 1500, fail_open: true }
+    case 'openai_moderation': return { type, api_key: '${env:OPENAI_API_KEY}', apply_to: 'input', timeout_ms: 1500, fail_open: true }
   }
   return { type }
 }
@@ -211,6 +219,17 @@ function PolicyEditor({ existing, catalog, onClose }: { existing?: Guardrail; ca
                     <Field label="Endpoint URL" hint={'Receives {phase, model, texts}; answers {action: allow|block|redact, message, texts}.'}><Input value={r.url ?? ''} onChange={(e) => upd(i, { url: e.target.value })} /></Field>
                     <Field label="Timeout (ms)"><Input type="number" value={r.timeout_ms ?? 1500} onChange={(e) => upd(i, { timeout_ms: Number(e.target.value) })} /></Field>
                     <Toggle checked={r.fail_open !== false} onChange={(v) => upd(i, { fail_open: v })} label="Allow requests if the webhook is down" />
+                  </div>
+                )}
+                {['lakera', 'azure_prompt_shield', 'azure_content_safety', 'openai_moderation'].includes(r.type) && (
+                  <div className="grid2">
+                    {r.type.startsWith('azure') ? <Field label="Content Safety endpoint" hint="https://<resource>.cognitiveservices.azure.com"><Input value={r.url ?? ''} onChange={(e) => upd(i, { url: e.target.value })} /></Field>
+                      : <Field label="Endpoint (optional)" hint="Leave empty for the vendor's public API."><Input value={r.url ?? ''} onChange={(e) => upd(i, { url: e.target.value })} /></Field>}
+                    <Field label="API key reference" hint="${env:NAME} or ${file:/path}. Keys are never stored in policies."><Input className="code" value={r.api_key ?? ''} onChange={(e) => upd(i, { api_key: e.target.value })} /></Field>
+                    {r.type === 'azure_content_safety' && <Field label="Block at severity" hint="0 safe, 2 low, 4 medium, 6 high"><Select value={String(r.max ?? 4)} onChange={(e) => upd(i, { max: Number(e.target.value) })} options={['2', '4', '6'].map((v) => ({ value: v, label: v }))} /></Field>}
+                    {r.type === 'lakera' && <Field label="Lakera project (optional)"><Input value={r.project_id ?? ''} onChange={(e) => upd(i, { project_id: e.target.value })} /></Field>}
+                    <Field label="Timeout (ms)"><Input type="number" value={r.timeout_ms ?? 1500} onChange={(e) => upd(i, { timeout_ms: Number(e.target.value) })} /></Field>
+                    <Toggle checked={r.fail_open !== false} onChange={(v) => upd(i, { fail_open: v })} label="Allow requests if the service is down" />
                   </div>
                 )}
                 {r.type === 'bedrock_guardrail' && (

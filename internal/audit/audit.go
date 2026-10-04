@@ -36,6 +36,8 @@ type Event struct {
 
 type Logger struct {
 	st *store.Store
+	// OnRecord, if set, receives every entry after it is committed (SIEM export).
+	OnRecord func(store.AuditEntry)
 }
 
 func New(st *store.Store) *Logger { return &Logger{st: st} }
@@ -70,7 +72,7 @@ func (l *Logger) record(ctx context.Context, ev Event) error {
 	if ev.OrgID != "" {
 		e.OrgID = &ev.OrgID
 	}
-	return l.st.Tx(ctx, func(tx pgx.Tx) error {
+	err := l.st.Tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(919191)`); err != nil {
 			return err
 		}
@@ -93,6 +95,10 @@ func (l *Logger) record(ctx context.Context, ev Event) error {
 			e.ID, e.TS, e.ActorType, e.ActorID, e.ActorEmail, e.OrgID, e.Action, e.TargetType, e.TargetID, string(e.Details), e.IP, e.UserAgent, e.PrevHash, e.Hash)
 		return err
 	})
+	if err == nil && l.OnRecord != nil {
+		l.OnRecord(*e)
+	}
+	return err
 }
 
 type VerifyResult struct {

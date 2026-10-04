@@ -20,6 +20,7 @@ import (
 	"theophylax/internal/audit"
 	"theophylax/internal/auth"
 	"theophylax/internal/config"
+	"theophylax/internal/export"
 	"theophylax/internal/guardrails"
 	"theophylax/internal/metrics"
 	"theophylax/internal/providers"
@@ -39,6 +40,7 @@ type Gateway struct {
 	Resolver *auth.Resolver
 	Signer   *receipts.Signer
 	Audit    *audit.Logger
+	Export   *export.Exporter // optional OTLP / log sink streaming
 }
 
 func (g *Gateway) Routes(mux *http.ServeMux) {
@@ -161,6 +163,8 @@ type reqState struct {
 	// model rollouts
 	plan       *rolloutPlan
 	shadowText strings.Builder
+	// W3C trace context from the client, carried into exported spans
+	traceparent string
 }
 
 // hashWriter hashes every response body byte so receipts attest to exactly what the client received.
@@ -181,7 +185,7 @@ func (w *hashWriter) Flush() {
 }
 
 func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers.Format, agentRef string) {
-	st := &reqState{start: time.Now()}
+	st := &reqState{start: time.Now(), traceparent: r.Header.Get("traceparent")}
 	reqID := util.NewID("req")
 	w.Header().Set("X-Request-Id", reqID)
 	st.log = store.RequestLog{ID: reqID, TS: st.start.UTC(), Endpoint: r.URL.Path, Status: 200, Attempts: 0,
@@ -526,7 +530,7 @@ func hasOutputRules(ps []guardrails.Policy) bool {
 		for _, r := range p.Rules {
 			if r.ApplyTo == "" || r.ApplyTo == "both" || r.ApplyTo == "output" {
 				switch r.Type {
-				case "pii", "secrets", "regex", "keywords", "webhook", "bedrock_guardrail":
+				case "pii", "secrets", "regex", "keywords", "webhook", "bedrock_guardrail", "lakera", "azure_content_safety", "openai_moderation":
 					return true
 				}
 			}
@@ -865,6 +869,9 @@ func (g *Gateway) finish(st *reqState) {
 		}
 	}
 	g.Logs.Enqueue(le)
+	if g.Export != nil {
+		g.Export.Request(export.Request{Log: le.Log, TraceParent: st.traceparent, ReceiptHash: hex.EncodeToString(le.ReceiptHash)})
+	}
 }
 
 func (g *Gateway) buildReceipt(st *reqState) *receipts.Receipt {

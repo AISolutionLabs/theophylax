@@ -46,7 +46,7 @@ func (g *Gateway) relayRoutes(mux *http.ServeMux) {
 
 // begin authenticates and initialises request state shared by every endpoint.
 func (g *Gateway) begin(w http.ResponseWriter, r *http.Request, cf providers.Format) (*reqState, *auth.Principal, *Snapshot, http.ResponseWriter, bool) {
-	st := &reqState{start: time.Now()}
+	st := &reqState{start: time.Now(), traceparent: r.Header.Get("traceparent")}
 	reqID := util.NewID("req")
 	w.Header().Set("X-Request-Id", reqID)
 	st.log = store.RequestLog{ID: reqID, TS: st.start.UTC(), Endpoint: r.URL.Path, Status: 200,

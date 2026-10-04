@@ -19,6 +19,7 @@ import (
 	"theophylax/internal/auth"
 	"theophylax/internal/config"
 	"theophylax/internal/db"
+	"theophylax/internal/export"
 	"theophylax/internal/gateway"
 	"theophylax/internal/guardrails"
 	"theophylax/internal/metrics"
@@ -30,13 +31,14 @@ import (
 )
 
 type Server struct {
-	Cfg     *config.Config
-	Pool    *pgxpool.Pool
-	Gateway *gateway.Gateway
-	API     *api.API
-	Handler http.Handler
-	stop    context.CancelFunc
-	logs    *gateway.RequestLogger
+	Cfg        *config.Config
+	Pool       *pgxpool.Pool
+	Gateway    *gateway.Gateway
+	API        *api.API
+	Handler    http.Handler
+	stop       context.CancelFunc
+	logs       *gateway.RequestLogger
+	exportDone chan struct{}
 }
 
 // New connects, migrates, bootstraps and starts background workers.
@@ -85,10 +87,14 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	if err != nil {
 		return nil, err
 	}
-	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al}
+	exp := export.New(export.ConfigFromEnv())
+	if exp != nil {
+		al.OnRecord = exp.Audit
+	}
+	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp}
 	guard.Judge = gw.Judge
 	api.Version = version
-	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer}
+	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global()}
 	if err := ap.Bootstrap(ctx); err != nil {
 		return nil, err
 	}
@@ -99,6 +105,8 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	go budgets.Run(bg)
 	go logs.Run(bg)
 	go gw.RL.Run(bg)
+	expDone := make(chan struct{})
+	go func() { exp.Run(bg); close(expDone) }()
 	go gateway.Retention(bg, st, cfg.RetentionDays)
 	ckEvery := 2 * time.Minute
 	if d, err := time.ParseDuration(os.Getenv("THEOPHYLAX_RECEIPT_CHECKPOINT_INTERVAL")); err == nil && d > 0 {
@@ -124,13 +132,17 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 		_, _ = w.Write([]byte("ready"))
 	})
 	mux.Handle("/", web.Handler())
-	return &Server{Cfg: cfg, Pool: pool, Gateway: gw, API: ap, Handler: securityHeaders(mux), stop: cancel, logs: logs}, nil
+	return &Server{Cfg: cfg, Pool: pool, Gateway: gw, API: ap, Handler: securityHeaders(mux), stop: cancel, logs: logs, exportDone: expDone}, nil
 }
 
 // Close stops background workers, flushes logs and closes the pool.
 func (s *Server) Close() {
 	s.stop()
 	s.logs.Wait()
+	select { // let exporters flush, but never hang shutdown on a dead sink
+	case <-s.exportDone:
+	case <-time.After(15 * time.Second):
+	}
 	s.Pool.Close()
 }
 

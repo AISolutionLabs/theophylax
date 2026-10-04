@@ -221,7 +221,11 @@ func (a *API) guardrailCatalog(c *Ctx) (any, error) {
 			{"type": "model_allowlist", "label": "Model allow-list", "description": "Only allow listed models (wildcards supported)."},
 			{"type": "max_tokens", "label": "Output token cap", "description": "Cap max_tokens on every request.", "actions": []string{"cap", "block"}},
 			{"type": "max_input_chars", "label": "Input size limit", "description": "Reject oversized prompts."},
-			{"type": "webhook", "label": "External webhook", "description": "Call your own classifier (e.g. Azure Content Safety, Lakera) for allow/block/redact verdicts."},
+			{"type": "webhook", "label": "External webhook", "description": "Call your own classifier for allow/block/redact verdicts. Headers can reference secrets with ${env:NAME}."},
+			{"type": "lakera", "label": "Lakera Guard", "description": "Prompt attacks, PII and content checks from your Lakera Guard policy."},
+			{"type": "azure_prompt_shield", "label": "Azure Prompt Shields", "description": "Azure AI Content Safety detection of direct and indirect (document or tool result) prompt attacks."},
+			{"type": "azure_content_safety", "label": "Azure Content Safety", "description": "Hate, sexual, violence and self-harm classification with a severity threshold."},
+			{"type": "openai_moderation", "label": "OpenAI moderation", "description": "omni-moderation via OpenAI or any compatible /moderations endpoint."},
 			{"type": "bedrock_guardrail", "label": "AWS Bedrock Guardrail", "description": "Apply a Bedrock Guardrail via an existing Bedrock connection."},
 		},
 	}, nil

@@ -75,6 +75,10 @@ func New(conn string, opt Options) (Provider, error) {
 		return newBedrock(base, c)
 	case KindAzureOpenAI, KindOpenAI:
 		return newOpenAI(base, c)
+	case KindVertex:
+		return newVertex(base, c)
+	case KindVertexOpenAI, KindGemini:
+		return newGoogleOpenAI(base, c)
 	case KindMock:
 		return newMock(base, c), nil
 	}

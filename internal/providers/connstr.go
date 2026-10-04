@@ -34,7 +34,21 @@ var kindAliases = map[string]string{
 	"azure-foundry": KindAzureFoundry, "azurefoundry": KindAzureFoundry, "foundry": KindAzureFoundry, "azure-anthropic": KindAzureFoundry, "azure_foundry": KindAzureFoundry,
 	"azure-openai": KindAzureOpenAI, "azureopenai": KindAzureOpenAI, "azure": KindAzureOpenAI, "azure_openai": KindAzureOpenAI,
 	"openai": KindOpenAI, "openai-compatible": KindOpenAI, "openai_compatible": KindOpenAI,
+	"vertex": KindVertex, "vertex-anthropic": KindVertex, "gcp": KindVertex, "google-vertex": KindVertex,
+	"vertex-openai": KindVertexOpenAI, "vertex-gemini": KindVertexOpenAI,
+	"gemini": KindGemini, "google": KindGemini, "google-ai": KindGemini,
+	"mistral": KindOpenAI, "groq": KindOpenAI, "together": KindOpenAI, "fireworks": KindOpenAI, "deepseek": KindOpenAI,
+	"xai": KindOpenAI, "openrouter": KindOpenAI, "ollama": KindOpenAI, "vllm": KindOpenAI, "lmstudio": KindOpenAI, "cerebras": KindOpenAI, "perplexity": KindOpenAI,
 	"mock": KindMock,
+}
+
+// presetBase maps OpenAI-compatible provider shorthands to their API base, so
+// groq://?api_key=… works without spelling out base_url.
+var presetBase = map[string]string{
+	"mistral": "https://api.mistral.ai/v1", "groq": "https://api.groq.com/openai/v1", "together": "https://api.together.xyz/v1",
+	"fireworks": "https://api.fireworks.ai/inference/v1", "deepseek": "https://api.deepseek.com/v1", "xai": "https://api.x.ai/v1",
+	"openrouter": "https://openrouter.ai/api/v1", "cerebras": "https://api.cerebras.ai/v1", "perplexity": "https://api.perplexity.ai",
+	"ollama": "http://localhost:11434/v1", "vllm": "http://localhost:8000/v1", "lmstudio": "http://localhost:1234/v1",
 }
 
 const (
@@ -43,6 +57,9 @@ const (
 	KindAzureFoundry = "azure-foundry"
 	KindAzureOpenAI  = "azure-openai"
 	KindOpenAI       = "openai"
+	KindVertex       = "vertex"
+	KindVertexOpenAI = "vertex-openai"
+	KindGemini       = "gemini"
 	KindMock         = "mock"
 )
 
@@ -89,6 +106,7 @@ func ParseConn(s string) (*Conn, error) {
 		return nil, fmt.Errorf("empty connection string")
 	}
 	c := &Conn{Params: map[string]string{}}
+	alias := ""
 	if i := strings.Index(s, "://"); i > 0 && !strings.Contains(s[:i], ";") && !strings.Contains(s[:i], "=") {
 		u, err := url.Parse(s)
 		if err != nil {
@@ -98,7 +116,7 @@ func ParseConn(s string) (*Conn, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown provider kind %q", u.Scheme)
 		}
-		c.Kind = k
+		c.Kind, alias = k, strings.ToLower(u.Scheme)
 		c.Host = u.Host + strings.TrimRight(u.Path, "/")
 		for key, vals := range u.Query() {
 			if len(vals) > 0 {
@@ -127,9 +145,9 @@ func ParseConn(s string) (*Conn, error) {
 		p := strings.ToLower(c.Params["provider"])
 		k, ok := kindAliases[p]
 		if !ok {
-			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|azure-foundry|azure-openai|openai>")
+			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|vertex|azure-foundry|azure-openai|gemini|openai|…>")
 		}
-		c.Kind = k
+		c.Kind, alias = k, p
 		delete(c.Params, "provider")
 		for _, hk := range []string{"region", "endpoint", "host", "resource"} {
 			if v := c.Params[hk]; v != "" && c.Host == "" {
@@ -145,6 +163,14 @@ func ParseConn(s string) (*Conn, error) {
 	}
 	if c.Kind == KindBedrock && c.Host == "" {
 		c.Host = c.Params["region"]
+	}
+	if base, ok := presetBase[alias]; ok && c.Params["base_url"] == "" {
+		switch {
+		case c.Host == "":
+			c.Params["base_url"] = base
+		case alias == "ollama" || alias == "vllm" || alias == "lmstudio":
+			c.Params["base_url"] = "http://" + c.Host + "/v1"
+		}
 	}
 	if c.Params["auth"] != "" {
 		c.Params["auth"] = strings.ToLower(strings.ReplaceAll(c.Params["auth"], "-", "_"))
@@ -177,7 +203,7 @@ func resolveRefs(v string) string {
 	})
 }
 
-var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true}
+var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true, "credentials": true}
 
 // Redacted renders the connection with secret values masked (references are kept visible).
 func (c *Conn) Redacted() string {

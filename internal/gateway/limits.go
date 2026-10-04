@@ -11,27 +11,46 @@ import (
 
 // RateLimiter enforces requests-per-minute and tokens-per-minute using a
 // sliding window approximation (current + weighted previous minute).
-// Limits are per replica; divide by replica count or front with a shared
-// limiter if exact global limits are required.
+//
+// With a store and a sync interval, limits are global across replicas: each
+// replica counts locally, and every interval flushes its deltas to Postgres
+// and reads back the fleet-wide totals for the keys it is tracking. The
+// estimate a replica enforces is (fleet total at last sync) + (its own
+// unflushed count), so overshoot is bounded by roughly
+// replicas × request rate × interval. Without a store it is per replica.
 type RateLimiter struct {
-	mu sync.Mutex
-	m  map[string]*rlWindow
+	mu       sync.Mutex
+	m        map[string]*rlWindow
+	st       *store.Store
+	interval time.Duration
 }
+
+type rlCount struct {
+	gR, gT int64 // fleet totals as of the last sync (includes our flushed counts)
+	pR, pT int64 // counted here, not yet flushed
+}
+
+func (c rlCount) reqs() int64 { return c.gR + c.pR }
+func (c rlCount) toks() int64 { return c.gT + c.pT }
 
 type rlWindow struct {
-	minute           int64
-	reqs, toks       int64
-	prevReqs, prevTk int64
+	minute    int64
+	cur, prev rlCount
 }
 
-func NewRateLimiter() *RateLimiter {
-	rl := &RateLimiter{m: map[string]*rlWindow{}}
+// NewRateLimiter returns a per-replica limiter.
+func NewRateLimiter() *RateLimiter { return NewSharedRateLimiter(nil, 0) }
+
+// NewSharedRateLimiter returns a limiter that synchronises counts through
+// Postgres every interval. A nil store or zero interval means per replica.
+func NewSharedRateLimiter(st *store.Store, interval time.Duration) *RateLimiter {
+	rl := &RateLimiter{m: map[string]*rlWindow{}, st: st, interval: interval}
 	go func() {
 		for range time.Tick(2 * time.Minute) {
 			now := time.Now().Unix() / 60
 			rl.mu.Lock()
 			for k, w := range rl.m {
-				if now-w.minute > 2 {
+				if now-w.minute > 2 && w.cur.pR == 0 && w.cur.pT == 0 && w.prev.pR == 0 && w.prev.pT == 0 {
 					delete(rl.m, k)
 				}
 			}
@@ -39,6 +58,129 @@ func NewRateLimiter() *RateLimiter {
 		}
 	}()
 	return rl
+}
+
+// Global reports whether counts are shared across replicas.
+func (rl *RateLimiter) Global() bool { return rl.st != nil && rl.interval > 0 }
+
+// Run synchronises with the other replicas until ctx is cancelled.
+func (rl *RateLimiter) Run(ctx context.Context) {
+	if !rl.Global() {
+		return
+	}
+	t := time.NewTicker(rl.interval)
+	defer t.Stop()
+	n := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := rl.sync(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("rate limit sync failed; enforcing local counts until it recovers", "err", err)
+			}
+			if n++; n%int(max(1, time.Minute/rl.interval)) == 0 {
+				_, _ = rl.st.Pool.Exec(ctx, `DELETE FROM rate_windows WHERE minute < $1`, time.Now().Unix()/60-5)
+			}
+		}
+	}
+}
+
+type rlDelta struct {
+	key    string
+	minute int64
+	r, t   int64
+}
+
+func (rl *RateLimiter) sync(ctx context.Context) error {
+	now := time.Now()
+	rl.mu.Lock()
+	var ds []rlDelta
+	keys := make([]string, 0, len(rl.m))
+	for k, w := range rl.m {
+		rl.win(k, now)
+		keys = append(keys, k)
+		for _, x := range []struct {
+			c *rlCount
+			m int64
+		}{{&w.cur, w.minute}, {&w.prev, w.minute - 1}} {
+			if x.c.pR != 0 || x.c.pT != 0 {
+				ds = append(ds, rlDelta{k, x.m, x.c.pR, x.c.pT})
+				x.c.gR += x.c.pR
+				x.c.gT += x.c.pT
+				x.c.pR, x.c.pT = 0, 0
+			}
+		}
+	}
+	rl.mu.Unlock()
+	if len(keys) == 0 {
+		return nil
+	}
+	restore := func() {
+		rl.mu.Lock()
+		defer rl.mu.Unlock()
+		for _, d := range ds {
+			if w := rl.m[d.key]; w != nil {
+				c := &w.cur
+				if d.minute == w.minute-1 {
+					c = &w.prev
+				} else if d.minute != w.minute {
+					continue
+				}
+				c.gR, c.gT, c.pR, c.pT = c.gR-d.r, c.gT-d.t, c.pR+d.r, c.pT+d.t
+			}
+		}
+	}
+	if len(ds) > 0 {
+		ks, ms, rs, ts := make([]string, len(ds)), make([]int64, len(ds)), make([]int64, len(ds)), make([]int64, len(ds))
+		for i, d := range ds {
+			ks[i], ms[i], rs[i], ts[i] = d.key, d.minute, d.r, d.t
+		}
+		if _, err := rl.st.Pool.Exec(ctx, `INSERT INTO rate_windows (key, minute, reqs, toks)
+			SELECT * FROM unnest($1::text[], $2::bigint[], $3::bigint[], $4::bigint[])
+			ON CONFLICT (key, minute) DO UPDATE SET reqs = rate_windows.reqs + EXCLUDED.reqs, toks = rate_windows.toks + EXCLUDED.toks`, ks, ms, rs, ts); err != nil {
+			restore()
+			return err
+		}
+	}
+	cur := now.Unix() / 60
+	rows, err := rl.st.Pool.Query(ctx, `SELECT key, minute, reqs, toks FROM rate_windows WHERE key = ANY($1) AND minute >= $2`, keys, cur-1)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type tot struct{ r, t int64 }
+	got := map[string]map[int64]tot{}
+	for rows.Next() {
+		var k string
+		var m, r, t int64
+		if err := rows.Scan(&k, &m, &r, &t); err != nil {
+			return err
+		}
+		if got[k] == nil {
+			got[k] = map[int64]tot{}
+		}
+		got[k][m] = tot{r, t}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for _, k := range keys {
+		w := rl.m[k]
+		if w == nil {
+			continue
+		}
+		rl.win(k, time.Now())
+		if v, ok := got[k][w.minute]; ok {
+			w.cur.gR, w.cur.gT = v.r, v.t
+		}
+		if v, ok := got[k][w.minute-1]; ok {
+			w.prev.gR, w.prev.gT = v.r, v.t
+		}
+	}
+	return nil
 }
 
 func (rl *RateLimiter) win(key string, now time.Time) *rlWindow {
@@ -51,7 +193,9 @@ func (rl *RateLimiter) win(key string, now time.Time) *rlWindow {
 	switch {
 	case w.minute == m:
 	case w.minute == m-1:
-		w.prevReqs, w.prevTk, w.reqs, w.toks, w.minute = w.reqs, w.toks, 0, 0, m
+		// Unflushed counts from two minutes ago are dropped: they no longer
+		// affect any window being enforced.
+		w.prev, w.cur, w.minute = w.cur, rlCount{}, m
 	default:
 		*w = rlWindow{minute: m}
 	}
@@ -68,8 +212,8 @@ func (rl *RateLimiter) Allow(key string, rpm, tpm int) (bool, int, string) {
 	defer rl.mu.Unlock()
 	w := rl.win(key, now)
 	frac := float64(now.Unix()%60) / 60
-	estR := float64(w.prevReqs)*(1-frac) + float64(w.reqs)
-	estT := float64(w.prevTk)*(1-frac) + float64(w.toks)
+	estR := float64(w.prev.reqs())*(1-frac) + float64(w.cur.reqs())
+	estT := float64(w.prev.toks())*(1-frac) + float64(w.cur.toks())
 	retry := int(60 - now.Unix()%60)
 	if rpm > 0 && estR+1 > float64(rpm) {
 		return false, retry, "requests per minute"
@@ -77,13 +221,13 @@ func (rl *RateLimiter) Allow(key string, rpm, tpm int) (bool, int, string) {
 	if tpm > 0 && estT >= float64(tpm) {
 		return false, retry, "tokens per minute"
 	}
-	w.reqs++
+	w.cur.pR++
 	return true, 0, ""
 }
 
 func (rl *RateLimiter) AddTokens(key string, n int) {
 	rl.mu.Lock()
-	rl.win(key, time.Now()).toks += int64(n)
+	rl.win(key, time.Now()).cur.pT += int64(n)
 	rl.mu.Unlock()
 }
 

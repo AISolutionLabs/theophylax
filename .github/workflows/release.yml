@@ -97,7 +97,7 @@ jobs:
     needs: image
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Package and push the chart to ghcr.io
         run: |
           v="${GITHUB_REF_NAME#v}"

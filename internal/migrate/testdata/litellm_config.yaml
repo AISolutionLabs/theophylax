@@ -1,0 +1,76 @@
+# Production-style LiteLLM proxy config
+model_list:
+  - model_name: claude-sonnet          # primary
+    litellm_params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: us-east-1
+      aws_role_name: arn:aws:iam::111122223333:role/bedrock-team-a
+      rpm: 600
+    model_info:
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+  - model_name: claude-sonnet
+    litellm_params:
+      model: bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: "eu-west-1"
+      aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
+      aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
+      weight: 2
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gpt-4o
+    litellm_params:
+      model: azure/gpt-4o-prod
+      api_base: https://acme-openai.openai.azure.com/
+      api_version: "2024-10-21"
+      api_key: os.environ/AZURE_API_KEY
+  - model_name: gemini-pro
+    litellm_params:
+      model: vertex_ai/gemini-2.5-pro
+      vertex_project: acme-ml
+      vertex_location: us-central1
+      vertex_credentials: os.environ/VERTEX_CREDS_PATH
+  - model_name: claude-vertex
+    litellm_params: {model: vertex_ai/claude-sonnet-4-5@20250929, vertex_project: acme-ml, vertex_location: us-east5}
+  - model_name: llama-local
+    litellm_params:
+      model: ollama_chat/llama3.1
+      api_base: http://gpu-box:11434
+  - model_name: groq-llama
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+  - model_name: titan-embed
+    litellm_params:
+      model: bedrock/amazon.titan-embed-text-v2:0
+      aws_region_name: us-east-1
+      aws_role_name: arn:aws:iam::111122223333:role/bedrock-team-a
+  - model_name: mystery
+    litellm_params:
+      model: sagemaker/my-endpoint
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  model_group_alias: {"sonnet": "claude-sonnet", "haiku": "claude-haiku"}
+  num_retries: 2
+
+litellm_settings:
+  drop_params: true
+  fallbacks: [{"claude-sonnet": ["claude-haiku"]}]
+  callbacks: ["otel"]
+  success_callback: ["langfuse"]
+  guardrails_note: |
+    multi-line
+    note here
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: True
+  alerting: []

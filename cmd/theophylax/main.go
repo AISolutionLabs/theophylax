@@ -30,6 +30,8 @@ func main() {
 			os.Exit(0)
 		case "verify-receipt":
 			os.Exit(verifyReceiptCLI(os.Args[2:]))
+		case "import-litellm":
+			os.Exit(importLiteLLMCLI(os.Args[2:]))
 		case "reset-password":
 			os.Exit(resetPasswordCLI(os.Args[2:]))
 		case "version":

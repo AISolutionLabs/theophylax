@@ -23,6 +23,7 @@ import (
 	"theophylax/internal/gateway"
 	"theophylax/internal/guardrails"
 	"theophylax/internal/metrics"
+	"theophylax/internal/modelwatch"
 	"theophylax/internal/providers"
 	"theophylax/internal/receipts"
 	"theophylax/internal/secrets"
@@ -95,6 +96,23 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	guard.Judge = gw.Judge
 	api.Version = version
 	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global()}
+	watch := modelwatch.New(st, func() map[string]providers.Provider {
+		out := map[string]providers.Provider{}
+		for id, e := range loader.Snapshot().Providers {
+			if e.P != nil && e.Row != nil && e.Row.Enabled {
+				out[id] = e.P
+			}
+		}
+		return out
+	})
+	watch.OnNew = func(ctx context.Context, found []modelwatch.Discovery) {
+		ids := make([]string, len(found))
+		for i, f := range found {
+			ids[i] = f.UpstreamModel
+		}
+		al.Record(ctx, audit.Event{Actor: audit.Actor{Type: "system", ID: "model_watch"}, Action: "model_watch.new_models", TargetType: "model_watch", Details: map[string]any{"models": ids}})
+	}
+	ap.Watch = watch
 	if err := ap.Bootstrap(ctx); err != nil {
 		return nil, err
 	}
@@ -105,6 +123,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	go budgets.Run(bg)
 	go logs.Run(bg)
 	go gw.RL.Run(bg)
+	go watch.Run(bg)
 	expDone := make(chan struct{})
 	go func() { exp.Run(bg); close(expDone) }()
 	go gateway.Retention(bg, st, cfg.RetentionDays)
@@ -120,6 +139,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	gw.ReceiptRoutes(mux)
 	ap.Routes(mux)
 	ap.SkillRoutes(mux)
+	ap.ModelWatchRoutes(mux)
 	mux.Handle("GET /metrics", metrics.Default.Handler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {

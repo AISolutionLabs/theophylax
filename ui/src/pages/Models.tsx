@@ -7,6 +7,8 @@ import { useModels, useProviders } from '../lib/queries'
 import { fmtCompact, kindLabel } from '../lib/format'
 import { Badge, Button, ChipsInput, Confirm, Drawer, Empty, ErrorNote, Field, Input, Loading, PageHead, Select, Tabs, useAction } from '../components/ui'
 
+import { ModelWatch } from './ModelWatch'
+
 const price = (v?: number | null) => (v == null ? '—' : `$${v}`)
 
 export default function Models() {
@@ -20,6 +22,7 @@ export default function Models() {
     <>
       <PageHead title="Models & routing" lede="The public model catalog. Each model routes to one or more deployments across providers with automatic failover; aliases let you move everyone to a new version in one change."
         actions={isPlatformAdmin && <Button variant="primary" onClick={() => setOpen('new')}><Plus size={15} /> Add model</Button>} />
+      {isPlatformAdmin && <ModelWatch />}
       {unpriced > 0 && <div className="callout warn" style={{ marginBottom: 14 }}><AlertTriangle size={16} /><div>{unpriced} routable model{unpriced > 1 ? 's have' : ' has'} no price set, so spend and dollar budgets can't be calculated for {unpriced > 1 ? 'them' : 'it'}. Token budgets still work.</div></div>}
       <div className="row" style={{ marginBottom: 14 }}><Input placeholder="Filter models" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} /></div>
       <div className="panel">

@@ -49,11 +49,20 @@ func rx(ps ...string) []*regexp.Regexp {
 // Patterns run on folded (lowercased, de-obfuscated) text.
 var injFamilies = []injFamily{
 	{name: "instruction_override", weight: 0.6, res: rx(
-		`\b(ignore|disregard|forget|override|bypass|skip|abandon|drop|neglect|discard)\b[^.\n]{0,40}\b(all|any|every|the|your|my|previous|prior|above|earlier|preceding|initial|original|system|developer|safety)\b[^.\n]{0,30}\b(instruction|instructions|rule|rules|guideline|guidelines|directive|directives|prompt|prompts|polic(y|ies)|constraint|constraints|guardrail|guardrails|restriction|restrictions|context|programming)\b`,
+		`\b(ignore|disregard|forget|abandon|neglect|discard)\b[^.\n]{0,40}\b(all|any|every|the|your|my|previous|prior|above|earlier|preceding|initial|original|system|developer|safety)\b[^.\n]{0,30}\b(instruction|instructions|rule|rules|guideline|guidelines|directive|directives|prompt|prompts|polic(y|ies)|constraint|constraints|guardrail|guardrails|restriction|restrictions|context|programming)\b`,
+		// Weaker verbs are everyday engineering words ("override the SDK's
+		// policy", "drop the next directive"); they need a qualifier that
+		// points at the model's own instructions.
+		`\b(override|bypass|skip|drop)\b[^.\n]{0,30}\b(your|all\s+(of\s+)?(your|the\s+previous|previous|prior)|previous|prior|above|earlier|preceding|initial|original|system|developer|safety)\b[^.\n]{0,20}\b(instructions|rules|guidelines|directives|prompt|programming|guardrails|restrictions)\b`,
 		`\b(new|updated|revised|real|actual|true)\s+(system\s+)?(instructions|rules|directive|task)\s*(:|follow|are)`,
 		`\bfrom now on,?\s+(you|your|always|never|only|respond|answer|act)\b`,
-		`\binstead,?\s+(you\s+(will|must|should)|do|respond|output|say)\b`,
+		`\binstead,?\s+(you\s+(will|must|should)|respond\s+(only|with)|output\s+(only|the)|say\s+(only|that))\b`,
 		`\b(stop|cease)\s+(being|acting\s+as|following)\b`,
+		`\b(do\s+not|don'?t|stop|no\s+longer)\s+follow(ing)?\s+(your|the|any)\s+(system\s+prompt|instructions|rules|guidelines|programming)\b`,
+		`\bpay\s+no\s+(attention|heed)\s+to\b[^.\n]{0,30}\b(rules|instructions|guidelines|prompt|guidance)\b`,
+		`\b(previous|prior|earlier|above|original|initial|old)\s+(instructions|rules|guidance|directives|prompt|guidelines)\s+(are|is|were|have\s+been|has\s+been)\s+(now\s+)?(cancel+ed|void|null|outdated|obsolete|revoked|superseded|invalid|no\s+longer\s+(valid|apply|applies|in\s+effect))\b`,
+		`\b(guidance|instructions|rules|guidelines|directives)\s+no\s+longer\s+appl(y|ies)\b`,
+		`\bsupersedes?\s+(all\s+)?(prior|previous|earlier|existing|other|your)\s+(directives|instructions|rules|guidelines)\b`,
 	)},
 	{name: "role_hijack", weight: 0.45, res: rx(
 		`\byou\s+are\s+(now|no\s+longer|not\s+(an?\s+)?(ai|assistant|chatbot))\b`,
@@ -71,26 +80,43 @@ var injFamilies = []injFamily{
 		`\b(reveal|print|show|repeat|output|display|leak|dump|disclose|recite|echo|return|tell\s+me|give\s+me|what\s+(is|are|was|were))\b[^.\n]{0,40}\b(system\s+(prompt|message|instructions)|initial\s+(prompt|instructions)|hidden\s+(prompt|instructions)|your\s+(instructions|prompt|rules|guidelines)|developer\s+(message|prompt)|the\s+(text|words|instructions)\s+above|everything\s+above|previous\s+text)\b`,
 		`\b(repeat|print|output)\s+(the\s+)?(words|text)\s+above\b`,
 		`\bverbatim\b[^.\n]{0,30}\b(prompt|instructions|above)\b`,
+		`\bwhat\s+(does|do|did)\s+your\s+(system\s+|initial\s+|hidden\s+)?(prompt|message|instructions)\s+(say|contain|tell\s+you)\b`,
+		`\b(exact|original|initial|hidden)\s+instructions\s+(you\s+were|you've\s+been)\s+given\b`,
+		`\b(everything|all\s+(the\s+)?text)\s+in\s+your\s+context\b`,
 	)},
 	{name: "template_injection", weight: 0.55, res: rx(
 		`<\|(im_start|im_end|system|user|assistant|endoftext|eot_id|start_header_id|end_header_id)\|>`,
-		`\[/?inst\]|<<\s*/?sys\s*>>|</?\s*(system|system_prompt|instructions)\s*>`,
+		`\[/?inst\]|<<\s*/?sys\s*>>|</?\s*(system|system_prompt)\s*>`,
 		`(^|\n)\s*#{2,}\s*(system|instruction|new instructions)\b`,
-		`(^|\n)\s*(human|assistant|system|user)\s*:\s*\S`,
+		`(^|\n)\s*(human|assistant)\s*:\s*\S`,
+		`(^|\n)\s*system\s*:\s*(you\s+are|ignore|disregard|new\s+(rules|instructions)|the\s+previous|from\s+now)`,
 		`\b(begin|start|end)\s+(of\s+)?(system\s+prompt|user\s+input|instructions)\b`,
 	)},
 	{name: "tool_hijack", weight: 0.5, res: rx(
+		`\b(run|execute|call|invoke|use)\s+(the\s+)?(following\s+)?(shell\s+)?(command|tool|function|script)s?\b[^.\n]{0,20}(:|now|immediately|without\s+asking)`,
+		`\b(call|use|invoke)\s+the\s+\w+\s+tool\s+with\b`,
+		`\b(must|should|need\s+to)\s+run\s+[\x60'"]?(cat|curl|wget|env|printenv|rm|scp|ssh)\b`,
+	)},
+	// A risky command on its own is common in docs and scripts (install
+	// one-liners, cleanup steps); it only scores high together with text that
+	// directs the agent.
+	{name: "dangerous_command", weight: 0.3, res: rx(
 		`\b(curl|wget|iwr|invoke-webrequest)\b[^\n|]{0,200}\|\s*(sudo\s+)?(sh|bash|zsh|python3?|node|iex|pwsh|powershell)\b`,
 		`\brm\s+-rf\s+(/|~|\$home|\*)`,
 		`\bbase64\s+(-d|--decode)\b[^\n]{0,80}\|\s*(sh|bash)\b`,
 		`\b(powershell|pwsh)\b[^\n]{0,40}\s-(e|enc|encodedcommand)\s`,
 		`\bnc\s+(-e|-c)\b|/dev/tcp/|\bmkfifo\b[^\n]{0,40}\bnc\b`,
-		`\b(run|execute|call|invoke|use)\s+(the\s+)?(following\s+)?(shell\s+)?(command|tool|function|script)s?\b[^.\n]{0,20}(:|now|immediately|without\s+asking)`,
 		`\b(chmod\s+\+x|crontab\s+-|ssh-keygen|authorized_keys)\b`,
+		`~/\.(aws/credentials|ssh/id_\w+|netrc|npmrc|docker/config\.json)\b`,
 	)},
 	{name: "exfiltration", weight: 0.5, res: rx(
 		`\b(send|post|upload|forward|exfiltrate|transmit|leak|email|share|paste)\b[^\n]{0,60}\b(contents?|data|secrets?|credentials?|passwords?|api\s*keys?|tokens?|env(ironment)?(\s+variables)?|conversation|chat\s+history|history|files?|ssh\s+keys?|\.env)\b[^\n]{0,80}\b(to|at|via)\b[^\n]{0,20}(https?://|webhook|this\s+(url|address|endpoint)|[\w.-]+@[\w-]+\.)`,
-		`!\[[^\]]*\]\(\s*https?://[^)\s]+\?[^)\s]*=[^)\s]*\)`,
+		// Markdown images with query strings are everywhere (CI badges), so
+		// only data-shaped queries count here; responses get the stricter
+		// post-call exfiltration guard.
+		`!\[[^\]]*\]\(\s*https?://[^)\s]+\?[^)\s]*=\s*(\{|<|\$\{|\[)[^)]*\)`,
+		`\]\(\s*https?://[^)\s]+\?[^)]*=\s*([{<\[$]|[^)&\s]*(insert|your_|user'?s|the_)[^)&\s]*(api[_ ]?key|token|secret|password|history|conversation|summary|credential))`,
+		`\b(render|include|append|add|embed|insert|end\s+(your\s+)?(responses?|replies|answers?)\s+with)\b[^\n]{0,50}\b(image|badge|link|pixel)?[^\n]{0,10}\]\(\s*https?://[^)]*\?`,
 		`\b(env|printenv|cat\s+~?/?\S*(\.env|id_rsa|credentials|\.aws/credentials|\.npmrc|\.netrc))\b[^\n]{0,60}\|\s*(curl|wget|nc)\b`,
 	)},
 	{name: "secrecy", weight: 0.3, res: rx(
@@ -103,6 +129,14 @@ var injFamilies = []injFamily{
 		`\b(note|message|instructions?|attention)\s+(to|for)\s+(the\s+|any\s+)?(ai|assistant|llm|language\s+model|agent|bot)\b`,
 		`\bif\s+you\s+are\s+(an?\s+)?(ai|llm|language\s+model|assistant|agent|bot)\b`,
 		`\b(important|urgent|critical)\s*[!:]+\s*(ai|assistant|agent|llm)\b`,
+		`(^|\n|<!--|#|//|"|\.\s)\s*(hey\s+|dear\s+)?(ai|assistant|claude|gpt|chatgpt|copilot|gemini|llm|agent|model)\s*,\s+(the\s+user|you|please|disregard|ignore|stop|before|do\s+not)\b`,
+		`\b(notice|alert|message|memo|directive)\s+(to|for)\s+(the\s+)?(ai|assistant|llm|agent|model|bot)s?\b`,
+		`\binstructions?\s+for\s+(llm|ai)\s+agents?\b`,
+		`\bwhen\s+(summari[sz]ing|reading|processing|answering\s+about|analy[sz]ing)\s+this\s+(page|document|file|email|repo(sitory)?|text)\b`,
+	)},
+	{name: "agent_directive", weight: 0.3, untrusted: true, res: rx(
+		`\b(do\s+it\s+now|without\s+asking|you\s+must\s+now|stop\s+(your\s+)?(current\s+)?task|before\s+answering|tell\s+the\s+user\s+(that\s+)?(their|your|the)|open\s+a\s+pull\s+request\s+that|push\s+(directly\s+)?to\s+main|the\s+user\s+has\s+(authori[sz]ed|approved|asked)\s+you)\b`,
+		`\b(must|log\s+in|sign\s+in|verify\s+your\s+account)\b[^\n]{0,30}\bhttps?://`,
 	)},
 	{name: "multilingual_override", weight: 0.55, res: rx(
 		`\bignora\b[^.\n]{0,20}\binstrucciones\b`,
@@ -114,6 +148,14 @@ var injFamilies = []injFamily{
 		`(以前|前|上記)の(指示|命令)を無視`,
 		`игнорир\S*[^.\n]{0,25}инструкци`,
 		`이전\s*(지시|명령)[^.\n]{0,6}무시`,
+		`(지시|명령|지침)\S*\s*무시`,
+		`\bnegeer\b[^.\n]{0,30}\b(instructies|regels|aanwijzingen)\b`,
+		`\bzignoruj\b[^.\n]{0,30}\b(instrukcj|polece|zasad)`,
+		`\btalimat\S*[^.\n]{0,20}\b(yok\s+say|görmezden\s+gel|dikkate\s+alma)`,
+		`تجاهل[^.\n]{0,40}(التعليمات|الأوامر|الإرشادات)`,
+		`(निर्देश|निर्देशों)[^।\n]{0,40}(अनदेखा|नज़रअंदाज़|नजरअंदाज)`,
+		`(指示|命令|指令)\S{0,8}(無視|无视)`,
+		`\b(ignorez|ignore)\b[^.\n]{0,25}\b(toutes\s+les\s+)?instructions\b[^.\n]{0,15}\b(précédentes|precedentes|antérieures)\b`,
 	)},
 }
 

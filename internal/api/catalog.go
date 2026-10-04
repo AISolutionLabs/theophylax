@@ -559,14 +559,11 @@ func (a *API) importModels(c *Ctx) (any, error) {
 				results = append(results, map[string]any{"name": name, "error": "model does not exist in catalog; ask a platform admin to add it"})
 				continue
 			}
-			fam := "other"
-			for _, f := range []string{"opus", "sonnet", "haiku", "fable", "mythos", "gpt", "llama", "nova", "mistral"} {
-				if strings.Contains(name, f) {
-					fam = f
-					break
-				}
+			kind := ""
+			if p := a.Loader.Snapshot().Providers[in.ProviderID]; p != nil && p.Row != nil {
+				kind = p.Row.Kind
 			}
-			m = &store.Model{ID: util.NewID("mdl"), Name: name, DisplayName: it.DisplayName, Family: fam, Status: "active", Strategy: "priority", Source: "discovered", Aliases: []string{}, Capabilities: []string{}}
+			m = a.newModelFromCatalog(name, it.DisplayName, kind, it.UpstreamModel)
 			if err := a.St.Insert(c, a.St.Pool, "models", m); err != nil {
 				results = append(results, map[string]any{"name": name, "error": err.Error()})
 				continue

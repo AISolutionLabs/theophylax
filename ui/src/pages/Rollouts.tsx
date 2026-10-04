@@ -41,8 +41,10 @@ export default function Rollouts() {
   const [sp, setSp] = useSearchParams()
   const list = useQuery({ queryKey: ['rollouts'], queryFn: () => get<Rollout[]>('/api/rollouts'), refetchInterval: 10_000 })
   const [creating, setCreating] = useState(sp.get('new') === '1')
+  // Prefill from Model watch ("Trial as rollout").
+  const [prefill] = useState({ provider: sp.get('provider') ?? '', upstream: sp.get('upstream') ?? '' })
   const [open, setOpen] = useState<string | null>(null)
-  useEffect(() => { if (sp.get('new')) { sp.delete('new'); setSp(sp, { replace: true }) } }, [sp, setSp])
+  useEffect(() => { if (sp.get('new')) { sp.delete('new'); sp.delete('provider'); sp.delete('upstream'); setSp(sp, { replace: true }) } }, [sp, setSp])
   return (
     <>
       <PageHead title="Model rollouts" lede="Move a model to a new version or provider safely. Shadow mirrors live traffic to the candidate and a judge model compares answers; canary then serves a slice of real traffic. Promotion and rollback happen automatically against your thresholds."
@@ -75,17 +77,17 @@ export default function Rollouts() {
           )
         })}
       </div>
-      {creating && <RolloutForm onClose={() => setCreating(false)} />}
+      {creating && <RolloutForm prefill={prefill} onClose={() => setCreating(false)} />}
       {open && <RolloutDrawer id={open} onClose={() => setOpen(null)} />}
     </>
   )
 }
 
-function RolloutForm({ onClose }: { onClose: () => void }) {
+function RolloutForm({ onClose, prefill }: { onClose: () => void; prefill?: { provider: string; upstream: string } }) {
   const models = useModels()
   const routable = useRoutableModels()
   const providers = useProviders()
-  const [f, setF] = useState({ model_id: '', candidate_provider_id: '', candidate_upstream: '', judge_model: '', shadow_pct: '10', canary_pct: '10', min_samples: '50', win_threshold: '50', max_error_rate: '5', max_latency_ratio: '1.5', auto_promote: true, auto_rollback: true, skip_shadow: false })
+  const [f, setF] = useState({ model_id: '', candidate_provider_id: prefill?.provider ?? '', candidate_upstream: prefill?.upstream ?? '', judge_model: '', shadow_pct: '10', canary_pct: '10', min_samples: '50', win_threshold: '50', max_error_rate: '5', max_latency_ratio: '1.5', auto_promote: true, auto_rollback: true, skip_shadow: false })
   const set = (k: keyof typeof f) => (v: any) => setF((x) => ({ ...x, [k]: v }))
   const create = useAction(() => post('/api/rollouts', {
     ...f, shadow_pct: Number(f.shadow_pct), canary_pct: Number(f.canary_pct), min_samples: Number(f.min_samples),

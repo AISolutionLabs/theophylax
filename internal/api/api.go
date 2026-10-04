@@ -17,6 +17,7 @@ import (
 	"theophylax/internal/export"
 	"theophylax/internal/gateway"
 	"theophylax/internal/guardrails"
+	"theophylax/internal/modelwatch"
 	"theophylax/internal/receipts"
 	"theophylax/internal/secrets"
 	"theophylax/internal/store"
@@ -36,6 +37,7 @@ type API struct {
 	Export  *export.Exporter
 	// RateLimitsGlobal reports whether RPM/TPM are enforced fleet-wide.
 	RateLimitsGlobal bool
+	Watch            *modelwatch.Watcher
 }
 
 type Ctx struct {

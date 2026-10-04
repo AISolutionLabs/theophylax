@@ -51,6 +51,7 @@ func (g *Gateway) Routes(mux *http.ServeMux) {
 		g.inference(w, r, providers.FormatOpenAI, r.PathValue("agent"))
 	})
 	mux.HandleFunc("POST /v1/embeddings", g.embeddings)
+	g.relayRoutes(mux)
 	mux.HandleFunc("POST /v1/messages/count_tokens", g.countTokens)
 	mux.HandleFunc("GET /v1/models", g.listModels)
 	mux.HandleFunc("GET /v1/whoami", g.whoami)
@@ -187,9 +188,14 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 		ClientIP: util.ClientIP(r, g.Cfg.TrustedProxies), UserAgent: truncate(r.UserAgent(), 200)}
 	clientOpenAI := cf == providers.FormatOpenAI
 
+	br := bridgeFrom(r.Context())
 	p, err := g.authenticate(r)
 	if err != nil {
-		code := writeErr(w, cf, err)
+		ef := cf
+		if br != nil {
+			ef = providers.FormatOpenAI
+		}
+		code := writeErr(w, ef, err)
 		metrics.Requests.Inc("", "", fmt.Sprint(code))
 		return
 	}
@@ -197,6 +203,9 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	st.p = p
 	st.hw = &hashWriter{ResponseWriter: w, h: sha256.New()}
 	w = st.hw
+	if br != nil {
+		w = newResponsesWriter(st.hw, br)
+	}
 	w.Header().Set("X-Theophylax-Receipt", reqID)
 	st.log.OrgID, st.log.TeamID, st.log.ProjectID = strPtr(p.OrgID), strPtr(p.TeamID), strPtr(p.ProjectID)
 	if p.Key != nil {
@@ -222,6 +231,9 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	}
 	rd := sha256.Sum256(raw)
 	st.reqDigest = hex.EncodeToString(rd[:])
+	if br != nil {
+		st.reqDigest = br.reqDigest // receipts attest to the client's Responses request
+	}
 	body := map[string]any{}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()

@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 
-.PHONY: all ui build test run docker compose-up helm-lint
+.PHONY: all ui build test run docker compose-up helm-lint bench
 
 all: ui build
 
@@ -25,3 +25,7 @@ compose-up:
 
 helm-lint:
 	helm lint deploy/helm/theophylax
+
+# Gateway benchmarks; see bench/README.md. Needs a running gateway and TPX_KEY.
+bench:
+	cd bench && go build -o loadgen-bin ./loadgen && ./run.sh

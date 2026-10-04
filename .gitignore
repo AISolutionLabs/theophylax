@@ -6,3 +6,7 @@ web/dist/*
 *.env
 .DS_Store
 !web/dist/index.html
+
+# benchmark outputs
+bench/results/
+bench/loadgen-bin

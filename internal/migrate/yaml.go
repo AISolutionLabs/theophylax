@@ -348,8 +348,12 @@ func (f *flow) value() (any, error) {
 			}
 			out = append(out, v)
 			f.ws()
-			if f.i < len(f.s) && f.s[f.i] == ',' {
+			switch {
+			case f.i < len(f.s) && f.s[f.i] == ',':
 				f.i++
+			case f.i < len(f.s) && f.s[f.i] == ']':
+			default:
+				return nil, fmt.Errorf("expected , or ] in flow sequence")
 			}
 		}
 	case '{':
@@ -365,6 +369,9 @@ func (f *flow) value() (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			if f.i >= len(f.s) || f.s[f.i] != ':' {
+				return nil, fmt.Errorf("expected : in flow mapping")
+			}
 			f.i++ // ':'
 			v, err := f.value()
 			if err != nil {
@@ -373,8 +380,12 @@ func (f *flow) value() (any, error) {
 			ks, _ := k.(string)
 			out[ks] = v
 			f.ws()
-			if f.i < len(f.s) && f.s[f.i] == ',' {
+			switch {
+			case f.i < len(f.s) && f.s[f.i] == ',':
 				f.i++
+			case f.i < len(f.s) && f.s[f.i] == '}':
+			default:
+				return nil, fmt.Errorf("expected , or } in flow mapping")
 			}
 		}
 	}

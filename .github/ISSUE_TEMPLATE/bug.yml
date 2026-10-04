@@ -1,0 +1,14 @@
+name: Bug report
+description: Something isn't working as documented
+body:
+  - type: textarea
+    attributes: { label: What happened, description: "Include the request ID (X-Request-Id) if a request failed." }
+    validations: { required: true }
+  - type: textarea
+    attributes: { label: What you expected }
+  - type: input
+    attributes: { label: Version, description: "theophylax version" }
+  - type: dropdown
+    attributes: { label: Provider, options: [Anthropic, AWS Bedrock, Vertex AI, Azure AI Foundry, Azure OpenAI, OpenAI-compatible, Custom, Other] }
+  - type: textarea
+    attributes: { label: Logs, description: "Redact keys and connection strings.", render: text }

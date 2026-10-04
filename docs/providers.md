@@ -34,6 +34,33 @@ Any base auth can chain an extra `role_arn` for cross-account access. Requests u
 
 IAM permissions: `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and for discovery `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`; for Bedrock Guardrails `bedrock:ApplyGuardrail`.
 
+### Entra ID → AWS federation
+
+For fleets that already run on Azure workload identity, Bedrock can authenticate with an Entra ID token exchanged at STS for a role in each AWS account (one provider per account keeps per-team billing isolation):
+
+```text
+bedrock://eu-west-1?auth=entra&entra_auth=workload&audience=api://bedrock-federation&role_arn=arn:aws:iam::111122223333:role/team-a
+```
+
+The IAM role trusts `sts.windows.net/<tenant-id>/` as an OIDC provider with the Entra application ID URI as audience. `entra_auth` is `workload` (AKS/EKS with `AZURE_FEDERATED_TOKEN_FILE`), `managed` or `entra` (client secret). `sts_endpoint=` points at an STS VPC endpoint.
+
+## Google Vertex AI
+
+```text
+vertex://us-east5?project=my-proj&auth=workload_identity&audience=//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/eks/providers/eks&token_file=/var/run/secrets/eks.amazonaws.com/serviceaccount/token&service_account=gateway@my-proj.iam.gserviceaccount.com
+vertex://global?project=my-proj&auth=metadata                 # GKE workload identity
+vertex://europe-west1?project=my-proj&credentials=${file:/secrets/sa.json}
+vertex-openai://us-central1?project=my-proj&auth=metadata     # Gemini and partner models (google/gemini-2.5-pro)
+```
+
+`vertex://` serves Claude through `rawPredict`/`streamRawPredict` in the Messages format (upstream IDs like `claude-sonnet-4-5@20250929`). `vertex-openai://` uses Vertex's OpenAI-compatible endpoint. Workload identity federation lets EKS or AKS pods call Vertex without a key file; an `external_account` credentials file from `gcloud iam workload-identity-pools create-cred-config` also works.
+
+## Gemini API
+
+```text
+gemini://?api_key=${env:GEMINI_API_KEY}
+```
+
 ## Azure AI Foundry (Claude on Azure)
 
 ```text
@@ -60,6 +87,10 @@ Provider=AzureOpenAI;Endpoint=https://my-oai.openai.azure.com;Auth=Entra;TenantI
 openai://api.openai.com?api_key=${env:OPENAI_API_KEY}
 openai://vllm.internal:8000?base_url=http://vllm.internal:8000/v1
 ```
+
+### Shorthand presets
+
+`groq://`, `mistral://`, `together://`, `deepseek://`, `xai://`, `openrouter://`, `fireworks://`, `cerebras://` and `perplexity://` fill in the public API base (`groq://?api_key=${env:GROQ_API_KEY}`); `ollama://gpu-box:11434`, `vllm://host:8000` and `lmstudio://host:1234` point at a local server.
 
 ## Custom credential provider
 

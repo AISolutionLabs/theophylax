@@ -7,6 +7,11 @@
 | POST | `/v1/messages` | Anthropic Messages (streaming, tools, betas) |
 | POST | `/v1/messages/count_tokens` | Proxied to Anthropic; estimated elsewhere |
 | POST | `/v1/chat/completions` | OpenAI Chat Completions (streaming, tools) |
+| POST | `/v1/responses` | OpenAI Responses: relayed to OpenAI-format providers, or bridged to Claude (function and custom tools, streaming events). `previous_response_id` needs an OpenAI-format provider |
+| POST | `/v1/embeddings` | OpenAI embeddings shape; OpenAI, Azure, Gemini, Vertex, Bedrock Titan/Cohere |
+| POST | `/v1/images/generations`, `/v1/images/edits`, `/v1/images/variations` | Relayed to OpenAI-format providers |
+| POST | `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations` | Relayed (multipart supported) |
+| POST | `/v1/moderations` | Relayed |
 | POST | `/v1/agents/{slug}/messages`, `/v1/agents/{slug}/chat/completions` | Managed agents |
 | GET | `/v1/models` | Models visible to the caller (Anthropic shape when `anthropic-version` is sent) |
 | GET | `/v1/whoami` | Caller context |

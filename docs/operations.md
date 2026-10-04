@@ -22,6 +22,10 @@
 | `THEOPHYLAX_TRUST_PROXY_HEADERS` | `true` | Use `X-Forwarded-For` for client IPs |
 | `THEOPHYLAX_PRICING_URL` | LiteLLM catalog on GitHub | Upstream price catalog (`https://…`, `file:///path` for an air-gapped mirror, or `off` to use only the stored copy) |
 | `THEOPHYLAX_PRICING_REFRESH` | `6h` | How often the price catalog is re-fetched |
+| `THEOPHYLAX_RATE_LIMIT_SYNC` | `500ms` | How often replicas share RPM/TPM counts through Postgres; `0` makes limits per replica |
+| `THEOPHYLAX_MODEL_WATCH_INTERVAL` | `6h` | How often connected providers are checked for new models; `0` disables |
+| `THEOPHYLAX_OTLP_ENDPOINT` / `THEOPHYLAX_OTLP_HEADERS` | — | OTLP/HTTP trace export, e.g. `http://alloy:4318` or `https://cloud.langfuse.com/api/public/otel` with `Authorization=Basic ${env:LANGFUSE_AUTH}` (`OTEL_EXPORTER_OTLP_*` also honoured) |
+| `THEOPHYLAX_LOG_SINK_URL` / `_FORMAT` / `_HEADERS` / `_AUDIT` | — / `json` / — / `true` | Stream request logs (metadata only) and the audit log: `json`, `ndjson`, `splunk_hec`, `elastic_bulk` |
 | `HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE` | | Standard egress settings; per-provider `proxy=` and `ca_bundle=` override |
 
 ## Endpoints
@@ -34,7 +38,30 @@ Disable proxy buffering and allow long idle times (≥ 10 minutes) for SSE: ingr
 
 ## Performance
 
-On 2 shared vCPUs with Postgres, the load generator and a zero-latency mock upstream on the same host, with Secret Shield, PII and injection guardrails, receipts and logging all enabled: ~2,300 req/s sustained, ~1 ms p50 end to end at low concurrency, gateway processing under 1 ms for 94% of requests, ~37 MB RSS. Scale horizontally; replicas share nothing but Postgres.
+On a shared 2-vCPU VM with Postgres, the load generator and a zero-latency mock upstream on the same host: about 1,450 req/s with Secret Shield, PII and injection guardrails, receipts and logging enabled (p50 5.9 ms, p99 24 ms at 10 concurrent), about 2,800 req/s with guardrails off, ~37 MB RSS, ready in under 0.1 s on restart. Comparisons with LiteLLM and Portkey and the harness to reproduce them are in [bench/README.md](../bench/README.md). Scale horizontally; replicas share nothing but Postgres.
+
+## Telemetry export
+
+Set `THEOPHYLAX_OTLP_ENDPOINT` to send one span per request using the OpenTelemetry GenAI conventions (`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`) plus Theophylax attributes (org, team, project, key, cost, guardrail actions, receipt hash). A client's `traceparent` header makes the span a child of the caller's trace. Set `THEOPHYLAX_LOG_SINK_URL` to stream request metadata and every audit event to a SIEM. Both are batched and retried off the request path; if a destination is down, events are dropped and counted in `theophylax_export_dropped_total` rather than slowing traffic. Prompt and response content is never exported.
+
+## Model watch
+
+Every `THEOPHYLAX_MODEL_WATCH_INTERVAL` one replica lists the models each connected provider serves. The first scan is a silent baseline; afterwards, newly available models appear on **Models & routing** for platform admins, with catalog price, context window and capabilities, and can be added or trialled as a rollout in one click. Models whose catalog entry has a retirement date within 90 days (or past) are flagged. Every scan and change is in the audit log (`model_watch.*`), so it also reaches your SIEM. Providers without a listing API (Vertex, Foundry) are skipped.
+
+## Migrating from LiteLLM
+
+`theophylax import-litellm` runs with the gateway's own environment (`THEOPHYLAX_DATABASE_URL`, `THEOPHYLAX_MASTER_KEY`) and writes everything in one transaction:
+
+| LiteLLM | Theophylax |
+|---|---|
+| `model_list` entries (`config.yaml` or `LiteLLM_ProxyModelTable`) | providers (de-duplicated by endpoint and credentials), models, weighted deployments |
+| `router_settings.model_group_alias` | model aliases |
+| organizations | organizations |
+| teams (models, RPM/TPM, budget) | teams with settings and a *LiteLLM keys* project, team budgets |
+| users and team/org roles | users (sign in with SSO or after a reset) and memberships |
+| keys (hash, alias, models, RPM/TPM, expiry, blocked) | gateway keys with the same hash, so `sk-…` keys keep working; key budgets |
+
+`os.environ/NAME` becomes `${env:NAME}`. Models LiteLLM stored in its database are encrypted with its salt key (`LITELLM_SALT_KEY`, or the master key if no salt key was set); pass it with `-litellm-salt-key`. Costs are not copied: each request is priced from the provider's list price for the upstream model. Spend history stays in key metadata.
 
 ## Backups and keys
 

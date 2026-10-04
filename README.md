@@ -2,7 +2,7 @@
 
 **An enterprise AI gateway where every model call is governed — and provable.**
 
-Theophylax (Greek *theos* "god" + *phylax* "guardian": a divine guardian) sits between your people, apps and agents and the models they use — Anthropic, AWS Bedrock, Azure AI Foundry, Azure OpenAI and any OpenAI-compatible endpoint. It speaks both the Anthropic Messages API and the OpenAI Chat Completions API, so Claude Code, the Anthropic and OpenAI SDKs and existing tools work unchanged.
+Theophylax (Greek *theos* "god" + *phylax* "guardian": a divine guardian) sits between your people, apps and agents and the models they use — Anthropic, AWS Bedrock, Google Vertex AI and Gemini, Azure AI Foundry, Azure OpenAI and any OpenAI-compatible endpoint. It speaks the Anthropic Messages API, OpenAI Chat Completions and the OpenAI Responses API, so Claude Code, Codex CLI, the Anthropic and OpenAI SDKs and existing tools work unchanged — and Responses clients can run on Claude.
 
 It is a single 13 MB Go binary (two external dependencies: the pgx Postgres driver and golang.org/x/text) with an embedded console, backed by PostgreSQL.
 
@@ -17,16 +17,19 @@ It is a single 13 MB Go binary (two external dependencies: the pgx Postgres driv
 
 ## Everything else you'd expect
 
-- **Providers & auth to them** — Anthropic (API key / bearer), Bedrock (IRSA, EKS Pod Identity, instance profile, assume-role, static keys, Bedrock API keys, PrivateLink endpoints), Azure AI Foundry and Azure OpenAI (API key, Entra client secret, workload identity federation, managed identity), OpenAI-compatible (vLLM, Ollama…), and **custom credential providers** (Basic or Bearer auth with automatic access/refresh-token handling; models are named `<model>@<credential>`). **OAuth 2.0** for Anthropic, OpenAI-compatible and custom providers: client credentials, or authorization code where an admin connects the provider once in the console. Per-connection egress proxy and CA bundle for TLS-inspecting proxies. Configure with a guided form or a **connection string** (`bedrock://eu-west-1?auth=irsa`, `Provider=AzureOpenAI;Endpoint=…;Auth=Entra;…`) with `${env:…}` / `${file:…}` secret references.
+- **Providers & auth to them** — Anthropic (API key / bearer), Bedrock (IRSA, EKS Pod Identity, instance profile, assume-role, static keys, Bedrock API keys, PrivateLink endpoints, and **Entra ID → IAM federation** for multi-account setups driven by Azure workload identity), Claude and Gemini on **Google Vertex AI** (service account, GKE metadata, or workload identity federation from EKS/AKS without keys), the **Gemini API**, shorthand presets for Groq, Mistral, Together, DeepSeek, xAI, OpenRouter, Fireworks, Cerebras, Perplexity, Ollama, vLLM and LM Studio, Azure AI Foundry and Azure OpenAI (API key, Entra client secret, workload identity federation, managed identity), OpenAI-compatible (vLLM, Ollama…), and **custom credential providers** (Basic or Bearer auth with automatic access/refresh-token handling; models are named `<model>@<credential>`). **OAuth 2.0** for Anthropic, OpenAI-compatible and custom providers: client credentials, or authorization code where an admin connects the provider once in the console. Per-connection egress proxy and CA bundle for TLS-inspecting proxies. Configure with a guided form or a **connection string** (`bedrock://eu-west-1?auth=irsa`, `Provider=AzureOpenAI;Endpoint=…;Auth=Entra;…`) with `${env:…}` / `${file:…}` secret references.
 - **Routing** — model catalog with aliases and wildcards, priority/weighted/latency strategies, automatic failover with circuit-breaking cooldowns, day-0 model discovery from Anthropic, Bedrock (incl. inference profiles) and OpenAI-compatible endpoints.
-- **Format translation** — Anthropic ⇄ OpenAI in both directions, streaming and tools included; Bedrock event-stream converted to SSE.
+- **Model watch** — every few hours the gateway asks each connected provider what it serves and shows admins genuinely new launches (priced and described from the catalog) with one-click *add* or *trial as rollout*, and warns when a model you route to is retiring.
+- **APIs** — Messages, Chat Completions, **Responses** (relayed to OpenAI-format providers, or bridged to Claude so Codex CLI and the Agents SDK run on Bedrock/Vertex/Anthropic), **embeddings** (OpenAI, Azure, Gemini, Vertex, Bedrock Titan and Cohere), images, audio and moderations — all with the same keys, limits, guardrails, Secret Shield, failover, pricing and receipts.
+- **Format translation** — Anthropic ⇄ OpenAI ⇄ Responses, streaming and tools included; Bedrock event-stream converted to SSE.
 - **Identity** — local admin bootstrap, OIDC SSO (Entra ID, Okta, Google, Auth0, Keycloak, Ping…) with PKCE, JIT provisioning and group → role mappings at org/team/project level, **SCIM 2.0** users and groups, and IdP access tokens accepted directly as gateway credentials (e.g. via Claude Code's `apiKeyHelper`).
 - **Tenancy & RBAC** — Organizations → Teams → Projects, with owner/admin/member/viewer roles inherited downwards. Owners exist at org and team level. Gateway keys belong to projects; personal access tokens drive the admin API.
-- **Guardrails** — pre-call and post-call (streams terminated mid-flight), layered org → team → project, enforce or monitor mode: Secret Shield, PII, prompt injection, keyword/regex deny-lists, model allow-lists, token caps, input size, external webhooks, AWS Bedrock Guardrails. Dry-run console.
-- **Limits & budgets** — RPM/TPM per key, project, team and org; daily/monthly/total budgets in dollars or tokens per org, team, project, key or person, enforced across replicas. Per-person limits resolve in order: the person's own budget, then their team's per-person budget, then the organization's per-person budget.
+- **Guardrails** — pre-call and post-call (streams terminated mid-flight), layered org → team → project, enforce or monitor mode: Secret Shield, PII, prompt injection, keyword/regex deny-lists, model allow-lists, token caps, input size, external webhooks, AWS Bedrock Guardrails, Lakera Guard, Azure Prompt Shields, Azure Content Safety and OpenAI moderation. Dry-run console. Injection detection is measured, not asserted: 91% recall with no false positives on a held-out test split, and 2.3% flagged on 308 real third-party docs read as tool output (every hit a prompt template or jailbreak example) — see [docs/guardrails.md](docs/guardrails.md#how-well-it-works).
+- **Limits & budgets** — RPM/TPM per key, project, team and org, enforced fleet-wide (replicas sync counts through Postgres every 500 ms); daily/monthly/total budgets in dollars or tokens per org, team, project, key or person, enforced across replicas. Per-person limits resolve in order: the person's own budget, then their team's per-person budget, then the organization's per-person budget.
 - **Agents** — managed agents (model + system prompt + approved skills + MCP servers + defaults) behind `/v1/agents/{slug}/messages`, with optional keys bound to a single agent.
 - **Skill registry & marketplace** — publish skills (SKILL.md), MCP servers (credentials encrypted), agent templates and prompts with immutable, content-addressed versions; review workflow; install per team/project; ratings; Claude Code skill sync via `/v1/skills`.
-- **Observability & audit** — async batched request logs (COPY), optional post-redaction payload capture, usage and chargeback by model/team/project/key/person/provider/agent, Prometheus metrics, JSON stdout logs for Loki/Splunk, and a tamper-evident hash-chained audit trail with one-click verification.
+- **Observability & audit** — async batched request logs (COPY), optional post-redaction payload capture, usage and chargeback by model/team/project/key/person/provider/agent, Prometheus metrics, **OpenTelemetry traces** (GenAI semantic conventions, client `traceparent` honoured) to Tempo, Langfuse, Datadog or Honeycomb, request and audit **log streaming** to Splunk HEC, Elastic or any HTTP endpoint, JSON stdout logs, and a tamper-evident hash-chained audit trail with one-click verification.
+- **Migrating from LiteLLM** — `theophylax import-litellm` reads your `config.yaml` and LiteLLM database (teams, users, keys, budgets, and DB-stored models, decrypted with your salt key). Existing `sk-…` keys keep working unchanged.
 - **Console** — a modern web UI for developers and admins: playground with streaming, keys with copy-paste quick-starts, receipts, rollouts, marketplace, guardrail builder, ⌘K command palette, light and dark themes.
 
 ## Quick start
@@ -85,6 +88,15 @@ helm install theophylax deploy/helm/theophylax \
 ```
 
 The chart ships HPA, PDB, zone spread, non-root read-only pods, optional ServiceMonitor and NetworkPolicy. Replicas are stateless; configuration changes propagate instantly to every replica through Postgres `LISTEN/NOTIFY`. See [docs/operations.md](docs/operations.md).
+
+## Migrating from LiteLLM
+
+```bash
+theophylax import-litellm -config litellm.yaml -litellm-db "$LITELLM_DATABASE_URL" \
+  -litellm-salt-key "$LITELLM_SALT_KEY" -dry-run     # review, then run again without -dry-run
+```
+
+Providers, models and routing come from `model_list`; organizations, teams, members, keys and budgets from the database. Keys are stored as SHA-256 hashes in both systems, so clients keep their `sk-…` keys. Re-running is safe. The report lists anything that needs a decision (unsupported providers, wildcard routes, callbacks to replace with OpenTelemetry).
 
 ## Documentation
 

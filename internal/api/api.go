@@ -14,6 +14,7 @@ import (
 	"theophylax/internal/audit"
 	"theophylax/internal/auth"
 	"theophylax/internal/config"
+	"theophylax/internal/export"
 	"theophylax/internal/gateway"
 	"theophylax/internal/guardrails"
 	"theophylax/internal/receipts"
@@ -32,6 +33,9 @@ type API struct {
 	Guard   *guardrails.Engine
 	Budgets *gateway.Budgets
 	Signer  *receipts.Signer
+	Export  *export.Exporter
+	// RateLimitsGlobal reports whether RPM/TPM are enforced fleet-wide.
+	RateLimitsGlobal bool
 }
 
 type Ctx struct {

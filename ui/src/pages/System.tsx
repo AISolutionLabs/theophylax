@@ -25,6 +25,15 @@ export default function System() {
             <div className="kpi"><div className="label">Database pool</div><div className="value" style={{ fontSize: 20 }}>{sys.data.db.total_conns}/{sys.data.db.max_conns}</div><div className="delta">{sys.data.db.idle_conns} idle</div></div>
           </div>
         )}
+        {sys.data && (
+          <Panel title="Integrations" sub="Configured with environment variables on the gateway; see docs/operations.md.">
+            <dl className="kv">
+              <dt>Rate limits</dt><dd>{sys.data.rate_limits === 'fleet-wide' ? 'Enforced fleet-wide (synced through Postgres)' : 'Per replica'}</dd>
+              <dt>OpenTelemetry traces</dt><dd className="mono">{sys.data.export?.otlp?.endpoint ?? <span className="dim">not configured (THEOPHYLAX_OTLP_ENDPOINT)</span>}</dd>
+              <dt>Log and audit sink</dt><dd className="mono">{sys.data.export?.log_sink ? `${sys.data.export.log_sink.url} (${sys.data.export.log_sink.format}${sys.data.export.log_sink.audit ? ', with audit log' : ''})` : <span className="dim">not configured (THEOPHYLAX_LOG_SINK_URL)</span>}</dd>
+            </dl>
+          </Panel>
+        )}
         <Panel title="Organizations" pad={false}>
           <table className="tbl"><tbody>{(orgs.data ?? []).map((o) => <tr key={o.id}><td className="cell-title">{o.name}</td><td className="mono dim">{o.slug}</td><td className="dim">{fmtTime(o.created_at)}</td></tr>)}</tbody></table>
         </Panel>

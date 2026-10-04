@@ -402,7 +402,8 @@ func (a *API) system(c *Ctx) (any, error) {
 	ps := a.St.Pool.Stat()
 	return map[string]any{"version": Version, "go": runtime.Version(), "goroutines": runtime.NumGoroutine(), "heap_mb": ms.HeapAlloc >> 20,
 		"config_loaded_at": snap.Loaded, "providers": len(snap.Providers), "routes": len(snap.Models) + len(snap.Wildcards),
-		"db": map[string]any{"total_conns": ps.TotalConns(), "idle_conns": ps.IdleConns(), "max_conns": ps.MaxConns()}}, nil
+		"db": map[string]any{"total_conns": ps.TotalConns(), "idle_conns": ps.IdleConns(), "max_conns": ps.MaxConns()},
+		"export": a.Export.Describe(), "rate_limits": map[bool]string{true: "fleet-wide", false: "per replica"}[a.RateLimitsGlobal]}, nil
 }
 
 // --- Skills for clients (Claude Code sync): gateway-key authenticated.

@@ -23,7 +23,7 @@ import (
 // identity, limits, input guardrails, failover, logging and receipts as chat.
 func (g *Gateway) embeddings(w http.ResponseWriter, r *http.Request) {
 	const cf = providers.FormatOpenAI
-	st := &reqState{start: time.Now()}
+	st := &reqState{start: time.Now(), traceparent: r.Header.Get("traceparent")}
 	reqID := util.NewID("req")
 	w.Header().Set("X-Request-Id", reqID)
 	st.log = store.RequestLog{ID: reqID, TS: st.start.UTC(), Endpoint: r.URL.Path, Status: 200,

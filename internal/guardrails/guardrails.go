@@ -37,10 +37,14 @@ type Rule struct {
 	ExfilGuard   bool     `json:"exfil_guard,omitempty"` // block data-smuggling links/images in responses
 	ToolGuard    bool     `json:"tool_guard,omitempty"`  // block risky tool calls after untrusted injection signals
 	AllowDomains []string `json:"allow_domains,omitempty"`
-	// webhook
-	URL       string `json:"url,omitempty"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
-	FailOpen  *bool  `json:"fail_open,omitempty"`
+	// webhook and vendor guardrails (lakera, azure_prompt_shield, azure_content_safety, openai_moderation)
+	URL       string            `json:"url,omitempty"`
+	TimeoutMS int               `json:"timeout_ms,omitempty"`
+	FailOpen  *bool             `json:"fail_open,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"` // values may be ${env:NAME} / ${file:/path}
+	APIKey    string            `json:"api_key,omitempty"` // a ${env:} or ${file:} reference
+	ProjectID string            `json:"project_id,omitempty"`
+	Model     string            `json:"model,omitempty"`
 	// bedrock_guardrail
 	ProviderID  string `json:"provider_id,omitempty"`
 	GuardrailID string `json:"guardrail_id,omitempty"`
@@ -541,6 +545,8 @@ func (e *Engine) evalRule(ctx context.Context, p Policy, r Rule, monitor bool, i
 		}
 	case "webhook":
 		e.webhook(ctx, p, r, monitor, in, texts, res, block)
+	case "lakera", "azure_prompt_shield", "azure_content_safety", "openai_moderation":
+		e.vendor(ctx, p, r, in, texts, res, block)
 	case "bedrock_guardrail":
 		if e.bedrock == nil {
 			return
@@ -592,6 +598,9 @@ func (e *Engine) webhook(ctx context.Context, p Policy, r Rule, monitor bool, in
 	payload, _ := json.Marshal(map[string]any{"phase": in.Phase, "model": in.Model, "texts": ts, "metadata": in.Metadata})
 	req, _ := http.NewRequestWithContext(cctx, http.MethodPost, r.URL, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range r.Headers {
+		req.Header.Set(k, resolveRef(v))
+	}
 	resp, err := e.client.Do(req)
 	failOpen := r.FailOpen == nil || *r.FailOpen
 	if err != nil || resp.StatusCode >= 300 {
@@ -840,7 +849,8 @@ func ParseRules(raw []byte) ([]Rule, error) {
 	}
 	for i, r := range rules {
 		switch r.Type {
-		case "pii", "secrets", "regex", "keywords", "prompt_injection", "model_allowlist", "max_tokens", "max_input_chars", "webhook", "bedrock_guardrail":
+		case "pii", "secrets", "regex", "keywords", "prompt_injection", "model_allowlist", "max_tokens", "max_input_chars", "webhook", "bedrock_guardrail",
+			"lakera", "azure_prompt_shield", "azure_content_safety", "openai_moderation":
 		default:
 			return nil, fmt.Errorf("rule %d: unknown type %q", i, r.Type)
 		}
@@ -856,6 +866,12 @@ func ParseRules(raw []byte) ([]Rule, error) {
 		}
 		if r.Type == "webhook" && !strings.HasPrefix(r.URL, "http") {
 			return nil, fmt.Errorf("rule %d: webhook requires url", i)
+		}
+		if (r.Type == "azure_prompt_shield" || r.Type == "azure_content_safety") && !strings.HasPrefix(r.URL, "https://") {
+			return nil, fmt.Errorf("rule %d: %s requires url (your Content Safety endpoint, https://<resource>.cognitiveservices.azure.com)", i, r.Type)
+		}
+		if r.APIKey != "" && !strings.HasPrefix(r.APIKey, "${") {
+			return nil, fmt.Errorf("rule %d: api_key must be a reference such as ${env:LAKERA_API_KEY} or ${file:/secrets/key}, so policies never store secrets", i)
 		}
 	}
 	return rules, nil

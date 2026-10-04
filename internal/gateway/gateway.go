@@ -23,6 +23,7 @@ import (
 	"theophylax/internal/export"
 	"theophylax/internal/guardrails"
 	"theophylax/internal/metrics"
+	"theophylax/internal/pricing"
 	"theophylax/internal/providers"
 	"theophylax/internal/receipts"
 	"theophylax/internal/store"
@@ -41,6 +42,7 @@ type Gateway struct {
 	Signer   *receipts.Signer
 	Audit    *audit.Logger
 	Export   *export.Exporter // optional OTLP / log sink streaming
+	Pricing  *pricing.Catalog
 }
 
 func (g *Gateway) Routes(mux *http.ServeMux) {
@@ -168,6 +170,9 @@ type reqState struct {
 	shadowText strings.Builder
 	// W3C trace context from the client, carried into exported spans
 	traceparent string
+	// respModel is the model name the upstream reported serving, used to
+	// price deployments whose configured ID is an alias (e.g. Azure deployment names).
+	respModel string
 }
 
 // hashWriter hashes every response body byte so receipts attest to exactly what the client received.
@@ -311,6 +316,7 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	}
 	if uid := p.UserID(); uid != "" {
 		st.scopes = append(st.scopes, ScopeRef{"user", uid})
+		st.scopes = append(st.scopes, PersonScopes(p.OrgID, p.TeamID, uid)...)
 	}
 	if err := g.checkLimits(w, snap, p, st.scopes); err != nil {
 		fail(err)
@@ -438,13 +444,13 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	}
 	st.log.InputTokens, st.log.OutputTokens = usage.Input, usage.Output
 	st.log.CacheReadTokens, st.log.CacheWriteTokens = usage.CacheRead, usage.CacheWrite
-	st.log.CostUSD = Cost(route.Model, usage)
+	st.log.CostUSD, st.log.PriceKey = g.Pricing.Cost(st.log.ProviderKind, usage, st.log.UpstreamModel, st.respModel)
 	finish(status, errMsg)
 	if strings.HasPrefix(used.ID, "rollout:") {
 		go g.recordCanary(strings.TrimPrefix(used.ID, "rollout:"), status, time.Since(st.start))
 	} else if st.plan != nil && st.plan.shadow && status == 200 {
 		go g.runShadow(&shadowJob{ro: st.plan.ro, requestID: reqID, clientFmt: cf, body: body, header: clientHdr, model: route.Model,
-			incText: st.shadowText.String(), incLatency: time.Since(st.start), incUsage: usage})
+			incText: st.shadowText.String(), incLatency: time.Since(st.start), incUsage: usage, incCost: st.log.CostUSD})
 	}
 }
 
@@ -455,6 +461,11 @@ func (g *Gateway) unaryResponse(w http.ResponseWriter, r *http.Request, resp *ht
 		return providers.Usage{}, code, err.Error()
 	}
 	var usage providers.Usage
+	var served struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(raw, &served)
+	st.respModel = served.Model
 	out := raw
 	switch {
 	case pf == cf && cf == providers.FormatAnthropic:
@@ -618,6 +629,7 @@ func (g *Gateway) streamResponse(w http.ResponseWriter, r *http.Request, resp *h
 			case "message_start", "message_delta":
 				var m struct {
 					Message struct {
+						Model string         `json:"model"`
 						Usage map[string]any `json:"usage"`
 					} `json:"message"`
 					Usage map[string]any `json:"usage"`
@@ -625,6 +637,7 @@ func (g *Gateway) streamResponse(w http.ResponseWriter, r *http.Request, resp *h
 				_ = json.Unmarshal(ev.Data, &m)
 				if ev.Event == "message_start" {
 					usage = providers.AnthropicUsage(m.Message.Usage)
+					st.respModel = m.Message.Model
 				} else if m.Usage != nil {
 					u := providers.AnthropicUsage(m.Usage)
 					usage.Output = u.Output
@@ -635,7 +648,7 @@ func (g *Gateway) streamResponse(w http.ResponseWriter, r *http.Request, resp *h
 						usage.CacheRead = u.CacheRead
 					}
 					if u.CacheWrite > 0 {
-						usage.CacheWrite = u.CacheWrite
+						usage.CacheWrite, usage.CacheWrite1h = u.CacheWrite, u.CacheWrite1h
 					}
 				}
 			case "content_block_delta":
@@ -667,12 +680,18 @@ func (g *Gateway) streamResponse(w http.ResponseWriter, r *http.Request, resp *h
 				}
 			}
 		default: // OpenAI upstream
-			if bytes.Contains(ev.Data, []byte(`"usage"`)) {
+			if bytes.Contains(ev.Data, []byte(`"usage"`)) || (st.respModel == "" && bytes.Contains(ev.Data, []byte(`"model"`))) {
 				var m struct {
+					Model string         `json:"model"`
 					Usage map[string]any `json:"usage"`
 				}
-				if json.Unmarshal(ev.Data, &m) == nil && m.Usage != nil {
-					usage = providers.OpenAIUsage(m.Usage)
+				if json.Unmarshal(ev.Data, &m) == nil {
+					if m.Usage != nil {
+						usage = providers.OpenAIUsage(m.Usage)
+					}
+					if st.respModel == "" {
+						st.respModel = m.Model
+					}
 				}
 			}
 			if wantText && len(ev.Data) > 0 && ev.Data[0] == '{' {
@@ -815,8 +834,8 @@ func (g *Gateway) checkLimits(w http.ResponseWriter, snap *Snapshot, p *auth.Pri
 			return util.Err(429, "rate_limit_error", fmt.Sprintf("%s rate limit exceeded (%s); retry in %ds", l.what, why, retry))
 		}
 	}
-	if b := g.Budgets.Exceeded(snap, scopes); b != nil {
-		return util.Err(429, "rate_limit_error", fmt.Sprintf("%s %s budget exhausted", b.Period, b.ScopeType))
+	if b := g.Budgets.Exceeded(snap, p.OrgID, p.TeamID, p.UserID(), scopes); b != nil {
+		return util.Err(429, "rate_limit_error", Describe(b)+" exhausted")
 	}
 	return nil
 }
@@ -851,7 +870,7 @@ func (g *Gateway) finish(st *reqState) {
 	tok := st.log.InputTokens + st.log.OutputTokens + st.log.CacheReadTokens + st.log.CacheWriteTokens
 	if tok > 0 {
 		for _, sc := range st.scopes {
-			if sc.Type != "user" {
+			if sc.Type != "user" && sc.Type != "org_user" && sc.Type != "team_user" {
 				g.RL.AddTokens(sc.Type+":"+sc.ID, tok)
 			}
 		}
@@ -898,25 +917,6 @@ func (g *Gateway) buildReceipt(st *reqState) *receipts.Receipt {
 		rc.Actions = append(rc.Actions, receipts.Action{Policy: f.Policy, Rule: f.Rule, Action: f.Action, Phase: f.Phase, Count: f.Count})
 	}
 	return rc
-}
-
-// Cost prices usage per million tokens. Cache pricing defaults to Anthropic's
-// standard multipliers (read 0.1x, write 1.25x input) when not set explicitly.
-func Cost(m *store.Model, u providers.Usage) float64 {
-	if m == nil || m.InputPrice == nil {
-		return 0
-	}
-	in := *m.InputPrice
-	out := util.Deref(m.OutputPrice)
-	cr := in * 0.1
-	if m.CacheReadPrice != nil {
-		cr = *m.CacheReadPrice
-	}
-	cw := in * 1.25
-	if m.CacheWritePrice != nil {
-		cw = *m.CacheWritePrice
-	}
-	return (float64(u.Input)*in + float64(u.Output)*out + float64(u.CacheRead)*cr + float64(u.CacheWrite)*cw) / 1e6
 }
 
 // Judge runs a guardrail classification through the gateway's own routing

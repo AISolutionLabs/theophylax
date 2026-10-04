@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +72,9 @@ func fakeOpenAI(t *testing.T) (*httptest.Server, *[]string) {
 }
 
 func TestRelayEndpoints(t *testing.T) {
+	cat := t.TempDir() + "/catalog.json"
+	_ = os.WriteFile(cat, []byte(`{"gpt-upstream":{"litellm_provider":"openai","input_cost_per_token":0.000002,"output_cost_per_token":0.000008,"cache_read_input_token_cost":0.0000005}}`), 0o644)
+	t.Setenv("THEOPHYLAX_TEST_PRICING_URL", "file://"+cat)
 	ts, s := setup(t)
 	up, seen := fakeOpenAI(t)
 	root := newClient(t, ts.URL)

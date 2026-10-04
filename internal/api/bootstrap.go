@@ -70,8 +70,7 @@ func (a *API) Bootstrap(ctx context.Context) error {
 		if err := a.St.Insert(ctx, tx, "providers", prov); err != nil {
 			return err
 		}
-		in, out := 0.5, 1.5
-		m := &store.Model{ID: util.NewID("mdl"), Name: "demo-echo", DisplayName: "Demo Echo", Family: "demo", Aliases: []string{"demo"}, InputPrice: &in, OutputPrice: &out,
+		m := &store.Model{ID: util.NewID("mdl"), Name: "demo-echo", DisplayName: "Demo Echo", Family: "demo", Aliases: []string{"demo"},
 			ContextWindow: 200000, MaxOutput: 8192, Capabilities: []string{"streaming", "tools"}, Status: "active", Strategy: "priority", Source: "seed"}
 		if err := a.St.Insert(ctx, tx, "models", m); err != nil {
 			return err

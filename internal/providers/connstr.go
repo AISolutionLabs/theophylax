@@ -39,6 +39,7 @@ var kindAliases = map[string]string{
 	"gemini": KindGemini, "google": KindGemini, "google-ai": KindGemini,
 	"mistral": KindOpenAI, "groq": KindOpenAI, "together": KindOpenAI, "fireworks": KindOpenAI, "deepseek": KindOpenAI,
 	"xai": KindOpenAI, "openrouter": KindOpenAI, "ollama": KindOpenAI, "vllm": KindOpenAI, "lmstudio": KindOpenAI, "cerebras": KindOpenAI, "perplexity": KindOpenAI,
+	"custom": KindCustom, "custom-credential": KindCustom, "custom_credential": KindCustom,
 	"mock": KindMock,
 }
 
@@ -61,6 +62,7 @@ const (
 	KindVertexOpenAI = "vertex-openai"
 	KindGemini       = "gemini"
 	KindMock         = "mock"
+	KindCustom       = "custom"
 )
 
 func normKey(k string) string {
@@ -96,6 +98,16 @@ func normKey(k string) string {
 		return "ca_bundle"
 	case "authorityhost":
 		return "authority_host"
+	case "tokenurl":
+		return "token_url"
+	case "refreshtoken":
+		return "refresh_token"
+	case "granttype":
+		return "grant_type"
+	case "authorizeurl":
+		return "authorize_url"
+	case "clientauth":
+		return "client_auth"
 	}
 	return k
 }
@@ -145,7 +157,7 @@ func ParseConn(s string) (*Conn, error) {
 		p := strings.ToLower(c.Params["provider"])
 		k, ok := kindAliases[p]
 		if !ok {
-			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|vertex|azure-foundry|azure-openai|gemini|openai|…>")
+			return nil, fmt.Errorf("connection string must include Provider=<anthropic|bedrock|vertex|azure-foundry|azure-openai|gemini|openai|custom|…>")
 		}
 		c.Kind, alias = k, p
 		delete(c.Params, "provider")
@@ -203,7 +215,7 @@ func resolveRefs(v string) string {
 	})
 }
 
-var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true, "credentials": true}
+var secretKeys = map[string]bool{"api_key": true, "secret_access_key": true, "session_token": true, "client_secret": true, "auth_token": true, "password": true, "token": true, "refresh_token": true, "credentials": true}
 
 // Redacted renders the connection with secret values masked (references are kept visible).
 func (c *Conn) Redacted() string {

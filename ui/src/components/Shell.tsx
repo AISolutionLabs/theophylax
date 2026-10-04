@@ -3,18 +3,18 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity, BadgeCheck, Bot, Boxes, Building2, ChevronsUpDown, CircleGauge, FlaskConical, GitBranch, KeyRound, LayoutGrid, LogOut,
-  Menu, Moon, Network, PiggyBank, Plug, ScrollText, Search, Server, Settings, ShieldCheck, Store, Sun, Upload, Users, Wallet,
+  Menu, Network, PiggyBank, Plug, Receipt, ScrollText, Search, Server, Settings, ShieldCheck, Store, Upload, Users, Wallet,
 } from 'lucide-react'
-import { useApp, useTheme } from '../lib/app'
+import { useApp } from '../lib/app'
 import { get, post } from '../lib/api'
 import { initials } from '../lib/format'
 import { Logo } from './ui'
+import { AppearanceMenu } from './Appearance'
 
 interface NavDef { to: string; label: string; icon: ReactNode; show?: boolean; count?: number; keywords?: string }
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, org, setOrg, isAdmin, isPlatformAdmin, orgRole } = useApp()
-  const { theme, toggle } = useTheme()
   const [railOpen, setRailOpen] = useState(false)
   const [palette, setPalette] = useState(false)
   const [orgMenu, setOrgMenu] = useState(false)
@@ -35,7 +35,7 @@ export function Shell({ children }: { children: ReactNode }) {
     { label: 'Govern', items: [
       { to: '/guardrails', label: 'Guardrails', icon: <ShieldCheck size={17} />, keywords: 'pii redact policy' },
       { to: '/budgets', label: 'Budgets', icon: <PiggyBank size={17} />, keywords: 'spend limits cost' },
-      { to: '/models', label: 'Models & routing', icon: <Network size={17} />, keywords: 'catalog deployments failover pricing' },
+      { to: '/models', label: 'Models & routing', icon: <Network size={17} />, keywords: 'catalog deployments failover' },
       { to: '/rollouts', label: 'Model rollouts', icon: <GitBranch size={17} />, keywords: 'shadow canary eval promote' },
       { to: '/providers', label: 'Providers', icon: <Plug size={17} />, show: isAdmin, keywords: 'bedrock azure anthropic connection string' },
     ] },
@@ -48,6 +48,7 @@ export function Shell({ children }: { children: ReactNode }) {
     { label: 'Evidence', items: [
       { to: '/requests', label: 'Requests', icon: <Activity size={17} />, keywords: 'logs receipts' },
       { to: '/usage', label: 'Usage & spend', icon: <Wallet size={17} />, keywords: 'analytics chargeback' },
+      { to: '/billing', label: 'Billing', icon: <Receipt size={17} />, keywords: 'invoice cost price statement spend' },
       { to: '/audit', label: 'Audit trail', icon: <ScrollText size={17} />, show: isAdmin },
     ] },
     { label: 'Platform', items: [
@@ -113,7 +114,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <button className="btn ghost icon mobile-menu" onClick={() => setRailOpen(true)} aria-label="Open navigation"><Menu size={18} /></button>
           <div className="crumbs"><span>{org.name}</span><span>/</span><b>{current?.label ?? 'Settings'}</b></div>
           <button className="search-trigger" onClick={() => setPalette(true)}><Search size={15} /><span>Jump to a page or action</span><kbd>⌘K</kbd></button>
-          <button className="btn ghost icon" onClick={toggle} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
+          <AppearanceMenu />
         </header>
         <main className="page">{children}</main>
       </div>

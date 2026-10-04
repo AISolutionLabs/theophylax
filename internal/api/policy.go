@@ -276,7 +276,11 @@ func (a *API) listBudgets(c *Ctx) (any, error) {
 		if !c.P.Can(s, "viewer") && !(b.ScopeType == "user" && b.ScopeID == c.P.UserID()) {
 			continue
 		}
-		cost, tok := a.Budgets.Current(b.ScopeType, b.ScopeID, b.Period)
+		var cost float64
+		var tok int64
+		if !b.PerUser {
+			cost, tok = a.Budgets.Spent(&b)
+		}
 		name := a.scopeName(snap, b.ScopeType, b.ScopeID)
 		if b.ScopeType == "user" {
 			if u, err := a.St.UserByID(c, b.ScopeID); err == nil {
@@ -298,6 +302,7 @@ type budgetIn struct {
 	Action      *string  `json:"action"`
 	ClearUSD    bool     `json:"clear_usd"`
 	ClearTokens bool     `json:"clear_tokens"`
+	PerUser     bool     `json:"per_user"`
 }
 
 func applyBudgetIn(b *store.Budget, in *budgetIn) {
@@ -335,10 +340,15 @@ func (a *API) createBudget(c *Ctx) (any, error) {
 	}
 	st, sid := util.Deref(in.ScopeType), util.Deref(in.ScopeID)
 	var s auth.Scope
+	if in.PerUser && st != "org" && st != "team" {
+		return nil, badReq("per-person budgets are set on an org or a team")
+	}
 	if st == "user" {
 		s = os
-		if _, err := a.St.UserByID(c, sid); err != nil {
-			return nil, badReq("user not found")
+		var member bool
+		_ = a.St.Pool.QueryRow(c, `SELECT EXISTS(SELECT 1 FROM memberships WHERE user_id=$1 AND org_id=$2)`, sid, o.ID).Scan(&member)
+		if !member {
+			return nil, badReq("user is not a member of this organization")
 		}
 	} else {
 		if s, err = a.budgetScope(c, st, sid); err != nil || s.OrgID != o.ID {
@@ -352,10 +362,15 @@ func (a *API) createBudget(c *Ctx) (any, error) {
 	if err := c.Require(s, "admin"); err != nil {
 		return nil, err
 	}
-	b := &store.Budget{ID: util.NewID("bud"), OrgID: o.ID, ScopeType: st, ScopeID: sid, Period: "monthly", AlertPct: 80, Action: "block"}
+	b := &store.Budget{ID: util.NewID("bud"), OrgID: o.ID, ScopeType: st, ScopeID: sid, Period: "monthly", AlertPct: 80, Action: "block", PerUser: in.PerUser}
 	applyBudgetIn(b, &in)
 	if b.LimitUSD == nil && b.LimitTokens == nil {
 		return nil, badReq("set limit_usd and/or limit_tokens")
+	}
+	var dup bool
+	_ = a.St.Pool.QueryRow(c, `SELECT EXISTS(SELECT 1 FROM budgets WHERE scope_type=$1 AND scope_id=$2 AND period=$3 AND per_user=$4)`, b.ScopeType, b.ScopeID, b.Period, b.PerUser).Scan(&dup)
+	if dup {
+		return nil, util.Err(409, "invalid_request_error", "a "+b.Period+" budget already exists for this scope; edit it instead")
 	}
 	if err := a.St.Insert(c, a.St.Pool, "budgets", b); err != nil {
 		return nil, err
@@ -417,6 +432,7 @@ type idpIn struct {
 	Issuer        *string          `json:"issuer"`
 	ClientID      *string          `json:"client_id"`
 	ClientSecret  *string          `json:"client_secret"`
+	ClearSecret   bool             `json:"clear_secret"`
 	Scopes        *[]string        `json:"scopes"`
 	GroupsClaim   *string          `json:"groups_claim"`
 	EmailDomains  *[]string        `json:"email_domains"`
@@ -466,10 +482,11 @@ func (a *API) applyIdP(i *store.IdP, in *idpIn) error {
 	if in.ClientID != nil {
 		i.ClientID = strings.TrimSpace(*in.ClientID)
 	}
-	if in.ClientSecret != nil && *in.ClientSecret != "" {
-		i.SecretEnc = a.Box.SealString(*in.ClientSecret)
-	} else {
+	// An omitted or empty secret keeps the stored one; removing it is explicit.
+	if in.ClearSecret {
 		i.SecretEnc = nil
+	} else if in.ClientSecret != nil && *in.ClientSecret != "" {
+		i.SecretEnc = a.Box.SealString(*in.ClientSecret)
 	}
 	if in.Scopes != nil {
 		i.Scopes = *in.Scopes
@@ -592,4 +609,62 @@ func (a *API) scimToken(c *Ctx) (any, error) {
 	}
 	c.Audit("idp.scim_token_rotate", i.OrgID, "idp", i.ID, nil)
 	return map[string]any{"token": plain, "scim_url": a.Cfg.PublicURL + "/scim/v2"}, nil
+}
+
+type personalLimit struct {
+	TeamID      string        `json:"team_id"`
+	TeamName    string        `json:"team_name"`
+	Period      string        `json:"period"`
+	Source      string        `json:"source"` // user | team | org
+	Budget      *store.Budget `json:"budget"`
+	SpentUSD    float64       `json:"spent_usd"`
+	SpentTokens int64         `json:"spent_tokens"`
+}
+
+// personalBudgets shows which per-person budget governs a person in each of
+// their teams and periods (own budget, else team default, else org default).
+func (a *API) personalBudgets(c *Ctx) (any, error) {
+	o, os, err := a.orgCtx(c, "")
+	if err != nil {
+		return nil, err
+	}
+	uid := c.Query("user_id")
+	if uid == "" {
+		uid = c.P.UserID()
+	} else if uid != c.P.UserID() {
+		if err := c.Require(os, "admin"); err != nil {
+			return nil, err
+		}
+	}
+	if uid == "" {
+		return []personalLimit{}, nil
+	}
+	type team struct {
+		ID   string `db:"id"`
+		Name string `db:"name"`
+	}
+	teams, err := store.List[team](c, a.St.Pool, `SELECT DISTINCT t.id, t.name FROM memberships m
+		LEFT JOIN projects p ON m.scope_type='project' AND p.id=m.scope_id
+		JOIN teams t ON t.id = CASE m.scope_type WHEN 'team' THEN m.scope_id WHEN 'project' THEN p.team_id END
+		WHERE m.user_id=$1 AND m.org_id=$2 ORDER BY t.name`, uid, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(teams) == 0 {
+		teams = []team{{}}
+	}
+	snap := a.Loader.Snapshot()
+	out := []personalLimit{}
+	for _, t := range teams {
+		for _, p := range gateway.Periods {
+			b, ctr := gateway.PersonalBudget(snap, o.ID, t.ID, uid, p)
+			if b == nil {
+				continue
+			}
+			src := b.ScopeType
+			cost, tok := a.Budgets.Current(ctr.Type, ctr.ID, p)
+			out = append(out, personalLimit{TeamID: t.ID, TeamName: t.Name, Period: p, Source: src, Budget: b, SpentUSD: cost, SpentTokens: tok})
+		}
+	}
+	return out, nil
 }

@@ -25,9 +25,10 @@ type Options struct {
 
 // Report counts what the import created and what it left alone.
 type Report struct {
-	Created  map[string]int `json:"created"`
-	Existing map[string]int `json:"already_present"`
-	Warnings []string       `json:"warnings"`
+	Created      map[string]int `json:"created"`
+	Existing     map[string]int `json:"already_present"`
+	Warnings     []string       `json:"warnings"`
+	customPrices int
 }
 
 func (r *Report) made(kind string)        { r.Created[kind]++ }
@@ -60,6 +61,9 @@ func Apply(ctx context.Context, st *store.Store, box *secrets.Box, plan *Plan, d
 	})
 	if err == errDryRun {
 		err = nil
+	}
+	if rep.customPrices > 0 {
+		rep.warn("%d model(s) had prices in LiteLLM's model_info; Theophylax prices each request from the provider's published list price for the upstream model, so those values were not imported", rep.customPrices)
 	}
 	if err == nil && !opt.DryRun {
 		_, _ = st.Pool.Exec(ctx, "SELECT pg_notify('theophylax_config', '')")
@@ -101,9 +105,14 @@ func applyModels(ctx context.Context, tx pgx.Tx, st *store.Store, box *secrets.B
 		if aliases == nil {
 			aliases = []string{}
 		}
-		row := &store.Model{ID: util.NewID("mdl"), Name: m.Name, DisplayName: m.Name, Aliases: aliases, InputPrice: m.InputPrice, OutputPrice: m.OutputPrice,
-			CacheReadPrice: m.CacheRead, CacheWritePrice: m.CacheWrite, MaxOutput: m.MaxOutput, ContextWindow: m.Context, Capabilities: []string{"streaming", "tools"},
-			Status: "active", Strategy: m.Strategy, Source: "litellm"}
+		row := &store.Model{ID: util.NewID("mdl"), Name: m.Name, DisplayName: m.Name, Aliases: aliases, MaxOutput: m.MaxOutput, ContextWindow: m.Context,
+			Capabilities: []string{"streaming", "tools"}, Status: "active", Strategy: m.Strategy, Source: "litellm"}
+		// Requests are priced from the provider's list price for each
+		// deployment's upstream model, so LiteLLM's per-model costs are not
+		// copied; custom contract prices need to be re-entered as such.
+		if m.InputPrice != nil {
+			rep.customPrices++
+		}
 		if err := st.Insert(ctx, tx, "models", row); err != nil {
 			return fmt.Errorf("model %s: %w", m.Name, err)
 		}
@@ -154,7 +163,9 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 		}
 		orgs[lid] = id
 		if b := d.Budgets[str(o["budget_id"])]; b != nil {
-			addBudget(ctx, tx, rep, id, "org", id, b)
+			if err := addBudget(ctx, tx, rep, id, "org", id, b); err != nil {
+				return err
+			}
 		}
 	}
 	orgOf := func(lid string) string {
@@ -202,7 +213,9 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 		case "org_admin":
 			role = "admin"
 		}
-		addMembership(ctx, tx, rep, id, org, "org", org, role)
+		if err := addMembership(ctx, tx, rep, id, org, "org", org, role); err != nil {
+			return err
+		}
 	}
 	for _, m := range d.OrgMembers {
 		uid, org := users[str(m["user_id"])], orgs[str(m["organization_id"])]
@@ -213,7 +226,9 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 		if strings.Contains(str(m["user_role"]), "admin") {
 			role = "admin"
 		}
-		addMembership(ctx, tx, rep, uid, org, "org", org, role)
+		if err := addMembership(ctx, tx, rep, uid, org, "org", org, role); err != nil {
+			return err
+		}
 	}
 
 	// Teams, each with a project for its keys.
@@ -254,7 +269,9 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 		}
 		teams[lid] = s
 		if t["max_budget"] != nil {
-			addBudget(ctx, tx, rep, s.org, "team", s.team, t)
+			if err := addBudget(ctx, tx, rep, s.org, "team", s.team, t); err != nil {
+				return err
+			}
 		}
 		var members []map[string]any
 		_ = json.Unmarshal(jsonOf(t["members_with_roles"]), &members)
@@ -267,11 +284,15 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 			if str(m["role"]) == "admin" {
 				role = "admin"
 			}
-			addMembership(ctx, tx, rep, uid, s.org, "team", s.team, role)
+			if err := addMembership(ctx, tx, rep, uid, s.org, "team", s.team, role); err != nil {
+				return err
+			}
 		}
 		for _, a := range asList(t["admins"]) {
 			if uid := users[str(a)]; uid != "" {
-				addMembership(ctx, tx, rep, uid, s.org, "team", s.team, "admin")
+				if err := addMembership(ctx, tx, rep, uid, s.org, "team", s.team, "admin"); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -340,9 +361,13 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 		}
 		rep.made("keys")
 		if k["max_budget"] != nil {
-			addBudget(ctx, tx, rep, s.org, "key", id, k)
+			if err := addBudget(ctx, tx, rep, s.org, "key", id, k); err != nil {
+				return err
+			}
 		} else if b := d.Budgets[str(k["budget_id"])]; b != nil {
-			addBudget(ctx, tx, rep, s.org, "key", id, b)
+			if err := addBudget(ctx, tx, rep, s.org, "key", id, b); err != nil {
+				return err
+			}
 		}
 		if mb := asMap(k["model_max_budget"]); len(mb) > 0 {
 			rep.warn("key %s has per-model budgets; Theophylax budgets apply across models, so set allowed models plus a key budget instead", name)
@@ -354,19 +379,23 @@ func applyDB(ctx context.Context, tx pgx.Tx, st *store.Store, d *LiteLLMData, op
 	return nil
 }
 
-func addMembership(ctx context.Context, tx pgx.Tx, rep *Report, user, org, scopeType, scopeID, role string) {
+func addMembership(ctx context.Context, tx pgx.Tx, rep *Report, user, org, scopeType, scopeID, role string) error {
 	tag, err := tx.Exec(ctx, `INSERT INTO memberships (id, user_id, org_id, scope_type, scope_id, role, source) VALUES ($1,$2,$3,$4,$5,$6,'litellm') ON CONFLICT (user_id, scope_type, scope_id) DO NOTHING`,
 		util.NewID("mbr"), user, org, scopeType, scopeID, role)
-	if err == nil && tag.RowsAffected() > 0 {
+	if err != nil {
+		return fmt.Errorf("membership: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
 		rep.made("memberships")
 	}
+	return nil
 }
 
 // addBudget maps max_budget + budget_duration to a Theophylax budget.
-func addBudget(ctx context.Context, tx pgx.Tx, rep *Report, org, scopeType, scopeID string, row map[string]any) {
+func addBudget(ctx context.Context, tx pgx.Tx, rep *Report, org, scopeType, scopeID string, row map[string]any) error {
 	limit := num(row["max_budget"])
 	if limit <= 0 {
-		return
+		return nil
 	}
 	period := "total"
 	dur := strings.ToLower(str(row["budget_duration"]))
@@ -380,11 +409,15 @@ func addBudget(ctx context.Context, tx pgx.Tx, rep *Report, org, scopeType, scop
 		period = "monthly"
 		rep.warn("%s budget with duration %q imported as monthly", scopeType, dur)
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO budgets (id, org_id, scope_type, scope_id, period, limit_usd, alert_pct, action) VALUES ($1,$2,$3,$4,$5,$6,80,'block') ON CONFLICT (scope_type, scope_id, period) DO NOTHING`,
+	tag, err := tx.Exec(ctx, `INSERT INTO budgets (id, org_id, scope_type, scope_id, period, limit_usd, alert_pct, action) VALUES ($1,$2,$3,$4,$5,$6,80,'block') ON CONFLICT (scope_type, scope_id, period, per_user) DO NOTHING`,
 		util.NewID("bud"), org, scopeType, scopeID, period, limit)
-	if err == nil && tag.RowsAffected() > 0 {
+	if err != nil {
+		return fmt.Errorf("%s budget: %w", scopeType, err)
+	}
+	if tag.RowsAffected() > 0 {
 		rep.made("budgets")
 	}
+	return nil
 }
 
 func settingsJSON(row map[string]any, _ any) json.RawMessage {

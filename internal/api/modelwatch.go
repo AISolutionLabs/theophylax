@@ -19,24 +19,46 @@ func (a *API) ModelWatchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/model-watch/scan", h(a.modelWatchScan))
 	mux.HandleFunc("POST /api/model-watch/discoveries/{id}/dismiss", h(a.modelWatchDismiss))
 	mux.HandleFunc("POST /api/model-watch/discoveries/{id}/add", h(a.modelWatchAdd))
-	mux.HandleFunc("POST /api/model-watch/apply-catalog", h(a.modelWatchApplyCatalog))
+}
+
+type catalogInfo struct {
+	Key           string   `json:"key"`
+	InputPerM     *float64 `json:"input_price,omitempty"`
+	OutputPerM    *float64 `json:"output_price,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	MaxOutput     int      `json:"max_output,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	Deprecation   string   `json:"deprecation_date,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+}
+
+func (a *API) catalogFor(kind, upstream string) *catalogInfo {
+	if a.Pricing == nil {
+		return nil
+	}
+	p := a.Pricing.Lookup(kind, upstream)
+	if p == nil {
+		return nil
+	}
+	q := p.Quote()
+	return &catalogInfo{Key: p.Key, InputPerM: q.Input, OutputPerM: q.Output, ContextWindow: p.MaxInput, MaxOutput: p.MaxOutput, Mode: p.Mode, Deprecation: p.Deprecation, Capabilities: p.Capabilities}
 }
 
 type discoveryView struct {
 	modelwatch.Discovery
-	ProviderName  string            `json:"provider_name"`
-	ProviderKind  string            `json:"provider_kind"`
-	SuggestedName string            `json:"suggested_name"`
-	Catalog       *modelwatch.Entry `json:"catalog,omitempty"`
+	ProviderName  string       `json:"provider_name"`
+	ProviderKind  string       `json:"provider_kind"`
+	SuggestedName string       `json:"suggested_name"`
+	Catalog       *catalogInfo `json:"catalog,omitempty"`
 }
 
-type catalogSuggestion struct {
-	ModelID   string            `json:"model_id"`
-	ModelName string            `json:"model_name"`
-	Upstream  string            `json:"upstream_model"`
-	Reason    string            `json:"reason"` // price_missing | price_changed | deprecated | deprecating
-	Current   map[string]any    `json:"current"`
-	Catalog   *modelwatch.Entry `json:"catalog"`
+type lifecycleNotice struct {
+	ModelID   string       `json:"model_id"`
+	ModelName string       `json:"model_name"`
+	Upstream  string       `json:"upstream_model"`
+	Provider  string       `json:"provider_name"`
+	Reason    string       `json:"reason"` // deprecated | deprecating
+	Catalog   *catalogInfo `json:"catalog"`
 }
 
 func (a *API) modelWatch(c *Ctx) (any, error) {
@@ -44,7 +66,6 @@ func (a *API) modelWatch(c *Ctx) (any, error) {
 		return nil, err
 	}
 	snap := a.Loader.Snapshot()
-	cat := a.Watch.Catalog()
 	rows, err := store.List[modelwatch.Discovery](c, a.St.Pool, `SELECT id, provider_id, upstream_model, display_name, kind, status, first_seen, last_seen, gone_at
 		FROM model_discoveries WHERE status='new' AND gone_at IS NULL ORDER BY first_seen DESC LIMIT 200`)
 	if err != nil {
@@ -53,70 +74,52 @@ func (a *API) modelWatch(c *Ctx) (any, error) {
 	newOnes := []discoveryView{}
 	for _, d := range rows {
 		v := discoveryView{Discovery: d, SuggestedName: SuggestName(d.UpstreamModel)}
-		if p := snap.Providers[d.ProviderID]; p != nil {
+		if p := snap.Providers[d.ProviderID]; p != nil && p.Row != nil {
 			v.ProviderName, v.ProviderKind = p.Row.Name, p.Row.Kind
 		}
-		if e, ok := cat.Lookup(v.ProviderKind, d.UpstreamModel); ok {
-			v.Catalog = &e
-		}
+		v.Catalog = a.catalogFor(v.ProviderKind, d.UpstreamModel)
 		newOnes = append(newOnes, v)
 	}
-	sugg := []catalogSuggestion{}
-	if cat.Len() > 0 {
-		soon := time.Now().AddDate(0, 0, 90)
-		done := map[string]bool{} // routes are indexed by name and alias
-		for _, rt := range snap.Models {
-			m := rt.Model
-			if done[m.ID] {
+	notices := []lifecycleNotice{}
+	soon := time.Now().AddDate(0, 0, 90)
+	done := map[string]bool{} // routes are indexed by name and by alias
+	for _, rt := range snap.Models {
+		for _, d := range rt.Deps {
+			if d.Provider == nil || d.Provider.Row == nil || !d.Enabled || done[d.ID] {
 				continue
 			}
-			done[m.ID] = true
-			for _, d := range rt.Deps {
-				if d.Provider == nil || d.Provider.Row == nil {
-					continue
-				}
-				e, ok := cat.Lookup(d.Provider.Row.Kind, d.UpstreamModel)
-				if !ok {
-					continue
-				}
-				cur := map[string]any{"input_price": m.InputPrice, "output_price": m.OutputPrice}
-				add := func(reason string) {
-					ec := e
-					sugg = append(sugg, catalogSuggestion{ModelID: m.ID, ModelName: m.Name, Upstream: d.UpstreamModel, Reason: reason, Current: cur, Catalog: &ec})
-				}
-				switch {
-				case m.InputPrice == nil && e.InputPrice != nil:
-					add("price_missing")
-				case m.InputPrice != nil && e.InputPrice != nil && differs(*m.InputPrice, *e.InputPrice) ||
-					m.OutputPrice != nil && e.OutputPrice != nil && differs(*m.OutputPrice, *e.OutputPrice):
-					add("price_changed")
-				}
-				if e.Deprecation != "" {
-					if t, err := time.Parse("2006-01-02", e.Deprecation); err == nil {
-						if t.Before(time.Now()) {
-							add("deprecated")
-						} else if t.Before(soon) {
-							add("deprecating")
-						}
-					}
-				}
-				break // one deployment per model is enough to price it
+			done[d.ID] = true
+			ci := a.catalogFor(d.Provider.Row.Kind, d.UpstreamModel)
+			if ci == nil || ci.Deprecation == "" {
+				continue
 			}
+			t, err := time.Parse("2006-01-02", ci.Deprecation)
+			if err != nil || t.After(soon) {
+				continue
+			}
+			reason := "deprecating"
+			if t.Before(time.Now()) {
+				reason = "deprecated"
+			}
+			notices = append(notices, lifecycleNotice{ModelID: rt.Model.ID, ModelName: rt.Model.Name, Upstream: d.UpstreamModel, Provider: d.Provider.Row.Name, Reason: reason, Catalog: ci})
 		}
-		sort.Slice(sugg, func(i, j int) bool { return sugg[i].ModelName < sugg[j].ModelName })
 	}
+	sort.Slice(notices, func(i, j int) bool { return notices[i].Catalog.Deprecation < notices[j].Catalog.Deprecation })
 	var last map[string]any
 	if r, err := store.List[struct {
-		RanAt     time.Time `db:"ran_at" json:"ran_at"`
-		Providers int       `db:"providers" json:"providers"`
-		NewModels int       `db:"new_models" json:"new_models"`
-		Catalog   int       `db:"catalog_models" json:"catalog_models"`
-		Errors    []byte    `db:"errors" json:"-"`
+		RanAt     time.Time `db:"ran_at"`
+		Providers int       `db:"providers"`
+		NewModels int       `db:"new_models"`
+		Catalog   int       `db:"catalog_models"`
+		Errors    []byte    `db:"errors"`
 	}](c, a.St.Pool, `SELECT ran_at, providers, new_models, catalog_models, errors FROM model_watch_runs ORDER BY ran_at DESC LIMIT 1`); err == nil && len(r) > 0 {
 		last = map[string]any{"ran_at": r[0].RanAt, "providers": r[0].Providers, "new_models": r[0].NewModels, "catalog_models": r[0].Catalog, "errors": jsonRaw(r[0].Errors)}
 	}
-	return map[string]any{"new": newOnes, "suggestions": sugg, "last_run": last, "catalog_url": a.Watch.CatalogURL,
-		"interval": a.Watch.Interval.String(), "catalog_models": cat.Len()}, nil
+	catalogModels := 0
+	if a.Pricing != nil {
+		catalogModels = a.Pricing.Len()
+	}
+	return map[string]any{"new": newOnes, "lifecycle": notices, "last_run": last, "interval": a.Watch.Interval.String(), "catalog_models": catalogModels}, nil
 }
 
 func jsonRaw(b []byte) json.RawMessage {
@@ -124,14 +127,6 @@ func jsonRaw(b []byte) json.RawMessage {
 		return json.RawMessage("[]")
 	}
 	return json.RawMessage(b)
-}
-
-func differs(a, b float64) bool {
-	if a == 0 {
-		return b != 0
-	}
-	d := (a - b) / a
-	return d > 0.005 || d < -0.005
 }
 
 func (a *API) modelWatchScan(c *Ctx) (any, error) {
@@ -163,15 +158,16 @@ func (a *API) modelWatchDismiss(c *Ctx) (any, error) {
 	return map[string]any{"ok": true}, nil
 }
 
-// modelWatchAdd turns a discovery into a catalog model (priced from the
-// catalog) or an extra deployment of an existing model.
+// modelWatchAdd turns a discovery into a catalog model or an extra
+// deployment of an existing model. Pricing follows the deployment's upstream
+// ID automatically.
 func (a *API) modelWatchAdd(c *Ctx) (any, error) {
 	if err := c.RequirePlatformAdmin(); err != nil {
 		return nil, err
 	}
 	var in struct {
-		Name    string `json:"name"`     // new model name (default: suggested)
-		ModelID string `json:"model_id"` // or: add as a deployment of this model
+		Name    string `json:"name"`
+		ModelID string `json:"model_id"`
 	}
 	if err := c.Decode(&in); err != nil {
 		return nil, err
@@ -209,13 +205,14 @@ func (a *API) modelWatchAdd(c *Ctx) (any, error) {
 		return nil, err
 	}
 	_, _ = a.St.Pool.Exec(c, `UPDATE model_discoveries SET status='added' WHERE id=$1`, d.ID)
-	c.Audit("model_watch.add", "", "model", model.ID, map[string]any{"upstream": d.UpstreamModel, "provider": prov.Name, "priced": model.InputPrice != nil})
+	ci := a.catalogFor(prov.Kind, d.UpstreamModel)
+	c.Audit("model_watch.add", "", "model", model.ID, map[string]any{"upstream": d.UpstreamModel, "provider": prov.Name, "priced": ci != nil && ci.InputPerM != nil})
 	a.changed(c)
-	return map[string]any{"model_id": model.ID, "model_name": model.Name, "deployment_id": dep.ID, "priced": model.InputPrice != nil}, nil
+	return map[string]any{"model_id": model.ID, "model_name": model.Name, "deployment_id": dep.ID, "priced": ci != nil && ci.InputPerM != nil}, nil
 }
 
-// newModelFromCatalog builds a model row with prices, limits and
-// capabilities from the catalog when it knows the upstream model.
+// newModelFromCatalog fills context window, output limit and capabilities
+// from the catalog when it knows the upstream model.
 func (a *API) newModelFromCatalog(name, display, kind, upstream string) *store.Model {
 	fam := "other"
 	for _, f := range []string{"opus", "sonnet", "haiku", "fable", "mythos", "gpt", "gemini", "llama", "nova", "mistral", "deepseek", "grok", "embed"} {
@@ -225,54 +222,12 @@ func (a *API) newModelFromCatalog(name, display, kind, upstream string) *store.M
 		}
 	}
 	m := &store.Model{ID: util.NewID("mdl"), Name: name, DisplayName: display, Family: fam, Status: "active", Strategy: "priority", Source: "discovered", Aliases: []string{}, Capabilities: []string{}}
-	if e, ok := a.Watch.Catalog().Lookup(kind, upstream); ok {
-		m.InputPrice, m.OutputPrice, m.CacheReadPrice, m.CacheWritePrice = e.InputPrice, e.OutputPrice, e.CacheRead, e.CacheWrite
-		m.ContextWindow, m.MaxOutput = e.MaxInput, e.MaxOutput
-		m.Capabilities = append([]string{"streaming"}, e.Capabilities...)
-		if e.Mode == "embedding" {
+	if ci := a.catalogFor(kind, upstream); ci != nil {
+		m.ContextWindow, m.MaxOutput = ci.ContextWindow, ci.MaxOutput
+		m.Capabilities = append([]string{"streaming"}, ci.Capabilities...)
+		if ci.Mode == "embedding" {
 			m.Capabilities = []string{"embeddings"}
 		}
 	}
 	return m
-}
-
-// modelWatchApplyCatalog applies catalog prices to the listed models.
-func (a *API) modelWatchApplyCatalog(c *Ctx) (any, error) {
-	if err := c.RequirePlatformAdmin(); err != nil {
-		return nil, err
-	}
-	var in struct {
-		ModelIDs []string `json:"model_ids"`
-	}
-	if err := c.Decode(&in); err != nil {
-		return nil, err
-	}
-	snap := a.Loader.Snapshot()
-	cat := a.Watch.Catalog()
-	updated := []string{}
-	for _, rt := range snap.Models {
-		want := false
-		for _, id := range in.ModelIDs {
-			want = want || id == rt.Model.ID
-		}
-		if !want {
-			continue
-		}
-		for _, d := range rt.Deps {
-			if d.Provider == nil || d.Provider.Row == nil {
-				continue
-			}
-			if e, ok := cat.Lookup(d.Provider.Row.Kind, d.UpstreamModel); ok && e.InputPrice != nil {
-				if _, err := a.St.Pool.Exec(c, `UPDATE models SET input_price=$2, output_price=$3, cache_read_price=COALESCE($4, cache_read_price), cache_write_price=COALESCE($5, cache_write_price), updated_at=now() WHERE id=$1`,
-					rt.Model.ID, e.InputPrice, e.OutputPrice, e.CacheRead, e.CacheWrite); err != nil {
-					return nil, err
-				}
-				updated = append(updated, rt.Model.Name)
-				break
-			}
-		}
-	}
-	c.Audit("model_watch.apply_catalog", "", "models", "", map[string]any{"models": updated, "source": a.Watch.CatalogURL})
-	a.changed(c)
-	return map[string]any{"updated": updated}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,9 +15,6 @@ func TestModelWatch(t *testing.T) {
 	models := []string{"model-a", "model-b"}
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/catalog.json":
-			_, _ = w.Write([]byte(`{"sample_spec":{},"model-c":{"input_cost_per_token":0.000002,"output_cost_per_token":0.000008,"max_input_tokens":200000,"max_output_tokens":32000,"mode":"chat","supports_function_calling":true},
-				"model-a":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000004,"deprecation_date":"2020-01-01"}}`))
 		case "/v1/models":
 			mu.Lock()
 			data := []map[string]string{}
@@ -30,7 +28,11 @@ func TestModelWatch(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	t.Setenv("THEOPHYLAX_MODEL_CATALOG_URL", up.URL+"/catalog.json")
+	cat := t.TempDir() + "/catalog.json"
+	_ = os.WriteFile(cat, []byte(`{"sample_spec":{},
+		"model-c":{"litellm_provider":"openai","input_cost_per_token":0.000002,"output_cost_per_token":0.000008,"max_input_tokens":200000,"max_output_tokens":32000,"mode":"chat","supports_function_calling":true},
+		"model-a":{"litellm_provider":"openai","input_cost_per_token":0.000001,"output_cost_per_token":0.000004,"deprecation_date":"2020-01-01"}}`), 0o644)
+	t.Setenv("THEOPHYLAX_TEST_PRICING_URL", "file://"+cat)
 	ts, s := setup(t)
 	root := newClient(t, ts.URL)
 	root.must("POST", "/api/auth/login", map[string]string{"email": "root@example.com", "password": "root-password-123"}, 200)
@@ -45,13 +47,10 @@ func TestModelWatch(t *testing.T) {
 	if len(w["new"].([]any)) != 0 || w["catalog_models"].(float64) != 2 {
 		t.Fatalf("baseline: %v", w)
 	}
-	// model-a is unpriced and deprecated per the catalog.
-	reasons := map[string]bool{}
-	for _, x := range w["suggestions"].([]any) {
-		reasons[x.(map[string]any)["reason"].(string)] = true
-	}
-	if !reasons["price_missing"] || !reasons["deprecated"] {
-		t.Fatalf("suggestions: %v", w["suggestions"])
+	// The catalog says model-a has been retired.
+	lc := w["lifecycle"].([]any)
+	if len(lc) != 1 || lc[0].(map[string]any)["reason"] != "deprecated" || lc[0].(map[string]any)["model_name"] != "model-a" {
+		t.Fatalf("lifecycle: %v", lc)
 	}
 
 	// The provider launches model-c.
@@ -77,12 +76,10 @@ func TestModelWatch(t *testing.T) {
 	if code != 200 || !strings.Contains(string(raw), "hi from c") {
 		t.Fatalf("serve new model: %d %s", code, raw)
 	}
-	// Applying the catalog prices model-a; the new-models list is now empty.
-	root.must("POST", "/api/model-watch/apply-catalog", map[string]any{"model_ids": []string{ma}}, 200)
-	var price float64
-	_ = s.Pool.QueryRow(t.Context(), `SELECT input_price FROM models WHERE id=$1`, ma).Scan(&price)
-	if price != 1 {
-		t.Fatalf("model-a price %v", price)
+	var ctxw int
+	_ = s.Pool.QueryRow(t.Context(), `SELECT context_window FROM models WHERE name='model-c'`).Scan(&ctxw)
+	if ctxw != 200000 {
+		t.Fatalf("model-c context window %d", ctxw)
 	}
 	if w = root.must("GET", "/api/model-watch", nil, 200); len(w["new"].([]any)) != 0 {
 		t.Fatalf("after add: %v", w["new"])

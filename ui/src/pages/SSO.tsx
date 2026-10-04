@@ -54,7 +54,7 @@ function IdPDrawer({ idp, onClose }: { idp?: IdP; onClose: () => void }) {
   const [tab, setTab] = useState<'connection' | 'access' | 'scim'>('connection')
   const [f, setF] = useState({
     name: idp?.name ?? '', issuer: idp?.issuer ?? '', client_id: idp?.client_id ?? '', client_secret: '', scopes: idp?.scopes ?? ['openid', 'email', 'profile'],
-    groups_claim: idp?.groups_claim ?? 'groups', email_domains: idp?.email_domains ?? [], jit: idp?.jit ?? true, default_role: idp?.default_role ?? 'member',
+    clear_secret: false, groups_claim: idp?.groups_claim ?? 'groups', email_domains: idp?.email_domains ?? [], jit: idp?.jit ?? true, default_role: idp?.default_role ?? 'member',
     role_mappings: idp?.role_mappings ?? [], gateway_tokens: idp?.gateway_tokens ?? false, audience: idp?.audience ?? '', enabled: idp?.enabled ?? true,
   })
   const [scim, setScim] = useState<{ token: string; scim_url: string } | null>(null)
@@ -63,6 +63,7 @@ function IdPDrawer({ idp, onClose }: { idp?: IdP; onClose: () => void }) {
   const save = useAction(() => {
     const body: any = { ...f }
     if (!body.client_secret) delete body.client_secret
+    if (!body.clear_secret) delete body.clear_secret
     return idp ? patch(`/api/idps/${idp.id}`, body) : post(`/api/orgs/${org.id}/idps`, body)
   }, { done: idp ? 'Identity provider saved' : 'Identity provider added', invalidate: [['idps']], onSuccess: () => !idp && onClose() })
   const remove = useAction(() => del(`/api/idps/${idp!.id}`), { done: 'Identity provider removed', invalidate: [['idps']], onSuccess: onClose })
@@ -86,7 +87,7 @@ function IdPDrawer({ idp, onClose }: { idp?: IdP; onClose: () => void }) {
             <Field label="Name" hint="Shown on the sign-in button."><Input value={f.name} onChange={(e) => set('name')(e.target.value)} /></Field>
             <Field label="Issuer URL"><Input className="code" value={f.issuer} onChange={(e) => set('issuer')(e.target.value)} /></Field>
             <Field label="Client ID"><Input className="code" value={f.client_id} onChange={(e) => set('client_id')(e.target.value)} /></Field>
-            <Field label="Client secret" hint={idp?.has_secret ? 'A secret is stored. Leave empty to keep it.' : 'Optional for public clients using PKCE.'}><Input type="password" value={f.client_secret} onChange={(e) => set('client_secret')(e.target.value)} autoComplete="off" /></Field>
+            <Field label="Client secret" hint={f.clear_secret ? 'The stored secret will be removed when you save; sign-in will use PKCE only.' : idp?.has_secret ? <>A secret is stored. Leave empty to keep it, or <a href="#" onClick={(e) => { e.preventDefault(); setF((x) => ({ ...x, client_secret: '', clear_secret: true })) }}>remove it</a> for a public client.</> : 'Optional for public clients using PKCE.'}><Input type="password" value={f.client_secret} disabled={f.clear_secret} onChange={(e) => set('client_secret')(e.target.value)} autoComplete="off" /></Field>
           </div>
           <Field label="Scopes"><ChipsInput value={f.scopes} onChange={set('scopes')} /></Field>
           <Toggle checked={f.enabled} onChange={set('enabled')} label="Show this provider on the sign-in page" />

@@ -24,6 +24,7 @@ import (
 	"theophylax/internal/guardrails"
 	"theophylax/internal/metrics"
 	"theophylax/internal/modelwatch"
+	"theophylax/internal/pricing"
 	"theophylax/internal/providers"
 	"theophylax/internal/receipts"
 	"theophylax/internal/secrets"
@@ -73,6 +74,8 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 		}
 		return nil
 	})
+	prices := pricing.New(pool, cfg.PricingURL, cfg.PricingRefresh)
+	prices.Init(ctx)
 	budgets := gateway.NewBudgets(st)
 	logs := gateway.NewRequestLogger(st, budgets, cfg.LogBufferSize, cfg.StdoutRequestLogs)
 	resolver := auth.NewResolver(st, box.SessionKey(), cfg.KeyCacheTTL)
@@ -92,11 +95,11 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	if exp != nil {
 		al.OnRecord = exp.Audit
 	}
-	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp}
+	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp, Pricing: prices}
 	guard.Judge = gw.Judge
 	api.Version = version
-	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global()}
-	watch := modelwatch.New(st, func() map[string]providers.Provider {
+	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global(), Pricing: prices}
+	watch := modelwatch.New(st, prices, func() map[string]providers.Provider {
 		out := map[string]providers.Provider{}
 		for id, e := range loader.Snapshot().Providers {
 			if e.P != nil && e.Row != nil && e.Row.Enabled {
@@ -121,6 +124,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	bg, cancel := context.WithCancel(context.Background())
 	go loader.Run(bg, pool)
 	go budgets.Run(bg)
+	go prices.Run(bg)
 	go logs.Run(bg)
 	go gw.RL.Run(bg)
 	go watch.Run(bg)

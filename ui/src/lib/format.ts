@@ -16,6 +16,9 @@ export function fmtUSD(n: number | undefined | null, precise = false) {
   return '$' + Math.round(v).toLocaleString('en-US')
 }
 
+/** USD per million tokens, e.g. "$3" or "$0.075". */
+export const fmtRate = (n: number | null | undefined) => (n == null ? '—' : `$${+n.toPrecision(6)}`)
+
 export function fmtMs(ms: number | undefined | null) {
   const v = ms ?? 0
   if (v >= 10000) return (v / 1000).toFixed(0) + 's'
@@ -48,7 +51,7 @@ export const initials = (s: string) =>
   s.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join('')
 
 export const kindLabel: Record<string, string> = {
-  anthropic: 'Anthropic', bedrock: 'AWS Bedrock', 'azure-foundry': 'Azure AI Foundry', 'azure-openai': 'Azure OpenAI', vertex: 'Claude on Vertex AI', 'vertex-openai': 'Vertex AI (Gemini)', gemini: 'Google Gemini', openai: 'OpenAI-compatible', mock: 'Built-in mock',
+  anthropic: 'Anthropic', bedrock: 'AWS Bedrock', 'azure-foundry': 'Azure AI Foundry', 'azure-openai': 'Azure OpenAI', vertex: 'Claude on Vertex AI', 'vertex-openai': 'Vertex AI (Gemini)', gemini: 'Google Gemini', openai: 'OpenAI-compatible', custom: 'Custom credential', mock: 'Built-in mock',
   skill: 'Skill', mcp_server: 'MCP server', agent: 'Agent template', prompt: 'Prompt', plugin: 'Plugin',
 }
 

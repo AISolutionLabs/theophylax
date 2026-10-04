@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (vet, tests with Postgres, race detector)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      THEOPHYLAX_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l cmd internal bench)" || (gofmt -l cmd internal bench; exit 1)
+      - run: go vet ./...
+      - name: Tests (includes the guardrail evaluation floors)
+        run: go test -race -count=1 ./...
+      - name: Fuzz smoke (20s per target)
+        run: |
+          set -e
+          for t in "migrate FuzzParseYAML" "migrate FuzzDecryptLiteLLM" "guardrails FuzzAnalyzeInjection" "providers FuzzParseConn" "providers FuzzSSEReader" "providers FuzzResponsesTranslation"; do
+            set -- $t
+            go test -run '^$' -fuzz "^$2\$" -fuzztime 20s ./internal/$1/
+          done
+
+  console:
+    name: Console (type-check and build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc -b
+      - run: npx vite build
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm/theophylax
+      - run: helm template t deploy/helm/theophylax > /dev/null
+
+  docker:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  dco:
+    name: Developer Certificate of Origin
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off
+        run: |
+          missing=$(git log --format='%H %s%n%b%x00' ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} \
+            | awk 'BEGIN{RS="\0"} !/Signed-off-by: /{print substr($0,1,60)}')
+          if [ -n "$missing" ]; then
+            echo "These commits are missing a Signed-off-by line (use git commit -s):"; echo "$missing"; exit 1
+          fi

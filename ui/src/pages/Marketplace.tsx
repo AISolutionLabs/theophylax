@@ -110,7 +110,7 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
             <div className="stack">
               {installable.length ? (
                 <div className="row" style={{ alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}><Field label="Install for" hint={item.kind === 'agent' ? 'Installing into a team or project creates a managed agent there.' : 'Installed skills are listed to clients in that scope via /v1/skills.'}>
+                  <div style={{ flex: 1 }}><Field label="Install for" hint={item.kind === 'agent' ? 'Installing into a team or project creates a managed agent there.' : item.kind === 'mcp_server' ? 'Installed MCP servers are listed to clients in that scope via /v1/mcp/servers.' : 'Installed skills are listed to clients in that scope via /v1/skills.'}>
                     <Select value={scope} onChange={(e) => setScope(e.target.value)} options={[{ value: '', label: 'Choose where…' }, ...installable]} /></Field></div>
                   <div style={{ flex: 1 }}><Field label="Version" hint="Following picks up each newly approved version. Pin to hold this scope on one version.">
                     <Select value={pin} onChange={(e) => setPin(e.target.value)} options={pinOptions} /></Field></div>
@@ -122,6 +122,13 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
                   <h3>Sync into Claude Code</h3>
                   <p className="muted">Installed skills can be pulled into a developer's machine with their gateway key:</p>
                   <CodeBlock code={`mkdir -p ~/.claude/skills && cd ~/.claude/skills\ncurl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" ${base}/v1/skills \\\n  | jq -r '.data[].download_url' \\\n  | while read u; do curl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" "$u" -o s.zip && unzip -oq s.zip && rm s.zip; done`} />
+                </>
+              )}
+              {item.kind === 'mcp_server' && (
+                <>
+                  <h3>Sync into Claude Code</h3>
+                  <p className="muted">Writes the MCP servers installed for a developer's project, team and org into a project's <code>.mcp.json</code>. Stored tokens stay in the gateway; servers that need one are marked <code>requires_authorization</code>.</p>
+                  <CodeBlock code={`curl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" ${base}/v1/mcp/servers | jq '.mcp_json' > .mcp.json`} />
                 </>
               )}
               <h3>Installed in</h3>

@@ -16,6 +16,7 @@
 | GET | `/v1/models` | Models visible to the caller (Anthropic shape when `anthropic-version` is sent) |
 | GET | `/v1/whoami` | Caller context |
 | GET | `/v1/skills`, `/v1/skills/{id}/download` | Skills installed for the key's scope |
+| GET | `/v1/mcp/servers` | MCP servers installed for the key's scope, with an `.mcp.json` document (`mcp_json`); stored tokens are never returned |
 | GET | `/v1/receipts/{request_id}` | Receipt + verification + anchoring |
 | POST | `/v1/receipts/verify` | Public verification helper |
 | GET | `/.well-known/theophylax-receipt-keys.json` | Receipt public keys |

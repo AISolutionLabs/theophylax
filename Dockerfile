@@ -8,7 +8,7 @@ COPY ui/ ./
 RUN npx tsc -b && npx vite build --outDir /out/dist --emptyOutDir
 
 # ── Gateway ────────────────────────────────────────────────────────────────
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath
 COPY go.mod go.sum ./

@@ -190,6 +190,10 @@ type Loader struct {
 	cur     atomic.Pointer[Snapshot]
 	mu      sync.Mutex
 	provs   map[string]*cachedProvider
+	// loadMu serialises Load. Without it, a reload that read the database
+	// before a change committed can finish after one that read it afterwards
+	// and replace the newer snapshot with a stale one.
+	loadMu  sync.Mutex
 	healths sync.Map // deployment id -> *health
 	kick    chan struct{}
 }
@@ -220,6 +224,8 @@ func parseSettings(raw json.RawMessage) store.ScopeSettings {
 }
 
 func (l *Loader) Load(ctx context.Context) error {
+	l.loadMu.Lock()
+	defer l.loadMu.Unlock()
 	q := l.st.Pool
 	s := &Snapshot{Models: map[string]*Route{}, Providers: map[string]*ProviderEntry{}, Policies: map[string][]guardrails.Policy{},
 		Budgets: map[string][]*store.Budget{}, Orgs: map[string]*ScopeInfo{}, Teams: map[string]*ScopeInfo{}, Projects: map[string]*ScopeInfo{},

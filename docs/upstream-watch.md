@@ -58,4 +58,5 @@ Window: roughly 2026-09-20 to 2026-10-05 (first run, so September items are incl
 - **pgx v5.7.1:** GO-2026-4772 and GO-2026-4771 are fixed in v5.9.0. GO-2026-4772 is in `pgproto3.Backend`, the server side of the protocol, and is unlikely to be reachable from a client. **pgx ≥ 5.9 requires Go ≥ 1.25**, so it is coupled to the toolchain bump.
 - **golang.org/x/text v0.18.0:** GO-2026-5970 (`unicode/norm` loop) is fixed in v0.39.0.
 - Dependabot opened these bumps (#3, #8, #9), and they were closed on 2026-10-05.
+- **Done (follow-up PR, 2026-10-05):** go directive 1.26.0 with toolchain go1.27.1, pgx v5.11.0, x/text v0.42.0, and the `golang:1.27-alpine` build image. The upgrade exposed a race between concurrent snapshot reloads, now serialised.
 - Vite CVE-2026-39364 is exploited in the wild, but only against an exposed dev server. **(d)** for production builds.

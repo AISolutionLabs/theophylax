@@ -30,7 +30,7 @@ bedrock://us-east-1?auth=api_key&api_key=${env:AWS_BEARER_TOKEN_BEDROCK}
 bedrock://eu-west-1?auth=irsa&endpoint=https://vpce-0abc.bedrock-runtime.eu-west-1.vpce.amazonaws.com
 ```
 
-Any base auth can chain an extra `role_arn` for cross-account access. Requests use InvokeModel / InvokeModelWithResponseStream with SigV4; `anthropic-beta` headers are moved into the body as Bedrock requires. Discovery lists Anthropic foundation models and inference profiles (`us.`, `eu.`, `global.` …) — use profile IDs as upstream model IDs for cross-region inference.
+Any base auth can chain an extra `role_arn` for cross-account access. Requests use InvokeModel / InvokeModelWithResponseStream with SigV4; `anthropic-beta` headers are moved into the body as Bedrock requires. Discovery lists Anthropic foundation models and inference profiles (`us.`, `eu.`, `global.` …) — use profile IDs as upstream model IDs for cross-region inference. Models launched from September 2026 have no date or `-v1:0` suffix (`anthropic.claude-opus-5-5`, `global.anthropic.claude-opus-5-5`); older ones keep it (`us.anthropic.claude-haiku-4-5-20251001-v1:0`).
 
 IAM permissions: `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and for discovery `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`; for Bedrock Guardrails `bedrock:ApplyGuardrail`.
 
@@ -53,7 +53,7 @@ vertex://europe-west1?project=my-proj&credentials=${file:/secrets/sa.json}
 vertex-openai://us-central1?project=my-proj&auth=metadata     # Gemini and partner models (google/gemini-2.5-pro)
 ```
 
-`vertex://` serves Claude through `rawPredict`/`streamRawPredict` in the Messages format (upstream IDs like `claude-sonnet-4-5@20250929`). `vertex-openai://` uses Vertex's OpenAI-compatible endpoint. Workload identity federation lets EKS or AKS pods call Vertex without a key file; an `external_account` credentials file from `gcloud iam workload-identity-pools create-cred-config` also works.
+`vertex://` serves Claude through `rawPredict`/`streamRawPredict` in the Messages format. Upstream IDs for models launched from September 2026 have no date suffix (`claude-opus-5-5`, `claude-sonnet-5-5`); older models keep it (`claude-haiku-4-5@20251001`). `vertex-openai://` uses Vertex's OpenAI-compatible endpoint. Workload identity federation lets EKS or AKS pods call Vertex without a key file; an `external_account` credentials file from `gcloud iam workload-identity-pools create-cred-config` also works.
 
 ## Gemini API
 

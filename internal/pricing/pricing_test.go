@@ -24,6 +24,11 @@ const fixture = `{
   "gpt-4o": {"litellm_provider": "openai", "input_cost_per_token": 2.5e-06, "output_cost_per_token": 1e-05, "cache_read_input_token_cost": 1.25e-06},
   "azure_ai/claude-opus-4-1": {"litellm_provider": "azure_ai", "input_cost_per_token": 1.5e-05, "output_cost_per_token": 7.5e-05},
   "claude-haiku-4-5": {"litellm_provider": "anthropic", "input_cost_per_token": 1e-06, "output_cost_per_token": 5e-06},
+  "claude-sonnet-5-5": {"litellm_provider": "anthropic", "input_cost_per_token": 2e-06, "output_cost_per_token": 1e-05},
+  "global.anthropic.claude-opus-5-5": {"litellm_provider": "bedrock_converse", "input_cost_per_token": 4e-06, "output_cost_per_token": 2e-05},
+  "eu.anthropic.claude-opus-5-5": {"litellm_provider": "bedrock_converse", "input_cost_per_token": 4.4e-06, "output_cost_per_token": 2.2e-05},
+  "vertex_ai/claude-sonnet-5-5": {"litellm_provider": "vertex_ai-anthropic_models", "input_cost_per_token": 2e-06, "output_cost_per_token": 1e-05},
+  "azure_ai/claude-opus-5-5": {"litellm_provider": "azure_ai", "input_cost_per_token": 4e-06, "output_cost_per_token": 2e-05},
   "text-embedding-3-small": {"litellm_provider": "openai", "input_cost_per_token": 2e-08, "output_cost_per_token": 0},
   "dall-e-3": {"litellm_provider": "openai", "output_cost_per_image": 0.04}
 }`
@@ -69,6 +74,13 @@ func TestLookup(t *testing.T) {
 		{providers.KindAzureFoundry, []string{"claude-opus-4-1"}, "azure_ai/claude-opus-4-1"},
 		{providers.KindAzureFoundry, []string{"claude-haiku-4-5"}, "claude-haiku-4-5"},
 		{providers.KindOpenAI, []string{"gpt-4o"}, "gpt-4o"},
+		// Models launched from September 2026 (Opus 5.5, Sonnet 5.5) have no
+		// date, "-v1:0" or "@date" suffix on any platform.
+		{providers.KindAnthropic, []string{"claude-sonnet-5-5"}, "claude-sonnet-5-5"},
+		{providers.KindBedrock, []string{"global.anthropic.claude-opus-5-5"}, "global.anthropic.claude-opus-5-5"},
+		{providers.KindBedrock, []string{"arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-5-5"}, "eu.anthropic.claude-opus-5-5"},
+		{providers.KindVertex, []string{"claude-sonnet-5-5"}, "vertex_ai/claude-sonnet-5-5"},
+		{providers.KindAzureFoundry, []string{"claude-opus-5-5"}, "azure_ai/claude-opus-5-5"},
 		// Another provider's entry with the same ID is never used.
 		{providers.KindAnthropic, []string{"claude-sonnet-4-5-20250929-v1:0"}, ""},
 		{providers.KindOpenAI, []string{"llama3:8b"}, ""},
@@ -144,13 +156,13 @@ func TestRefreshFetchesCatalog(t *testing.T) {
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if st := c.Status(); st.Models != 10 || st.FetchedAt == nil || st.Source != srv.URL {
+	if st := c.Status(); st.Models != 15 || st.FetchedAt == nil || st.Source != srv.URL {
 		t.Fatalf("status: %+v", st)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "nope", 500) }))
 	defer bad.Close()
 	c.url = bad.URL
-	if err := c.Refresh(context.Background()); err == nil || c.Len() != 10 || c.Status().LastError == "" {
+	if err := c.Refresh(context.Background()); err == nil || c.Len() != 15 || c.Status().LastError == "" {
 		t.Fatal("a failed refresh must keep the previous prices and report the error")
 	}
 }

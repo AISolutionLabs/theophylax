@@ -99,6 +99,41 @@ func TestVertexServiceAccount(t *testing.T) {
 	if gotBody["anthropic_version"] != "vertex-2023-10-16" || gotBody["model"] != nil {
 		t.Fatalf("body %v", gotBody)
 	}
+	// Models launched from September 2026 have no "@date" suffix.
+	resp, err = p.Send(context.Background(), &Request{Body: map[string]any{"model": "x", "max_tokens": 10, "messages": []any{}}, UpstreamModel: "claude-sonnet-5-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if gotPath != "/v1/projects/my-proj/locations/us-east5/publishers/anthropic/models/claude-sonnet-5-5:rawPredict" {
+		t.Fatalf("path %s", gotPath)
+	}
+}
+
+func TestBedrockUnsuffixedModelID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		_, _ = w.Write([]byte(`{"type":"message","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":3,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	p, err := New("bedrock://us-east-1?auth=api_key&api_key=k&endpoint="+url.QueryEscape(srv.URL), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{
+		"global.anthropic.claude-opus-5-5":             "/model/global.anthropic.claude-opus-5-5/invoke",
+		"us.anthropic.claude-sonnet-4-5-20250929-v1:0": "/model/us.anthropic.claude-sonnet-4-5-20250929-v1%3A0/invoke",
+	} {
+		resp, err := p.Send(context.Background(), &Request{Body: map[string]any{"model": "x", "max_tokens": 10, "messages": []any{}}, UpstreamModel: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if gotPath != want {
+			t.Errorf("%s: path %s, want %s", id, gotPath, want)
+		}
+	}
 }
 
 func TestBedrockEntraFederation(t *testing.T) {

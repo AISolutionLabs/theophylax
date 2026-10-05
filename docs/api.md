@@ -40,4 +40,8 @@ Rollouts: `/api/rollouts`, `/api/rollouts/{id}`, `POST /api/rollouts/{id}/{pause
 
 Evidence: `/api/orgs/{org}/logs`, `/api/logs/{id}`, `/api/orgs/{org}/usage` (`days`, `group_by`), `/api/orgs/{org}/billing` (`month=YYYY-MM`, `mine`), `/api/pricing`, `POST /api/pricing/refresh` (platform admin), `/api/orgs/{org}/overview`, `/api/orgs/{org}/audit`, `/api/audit`, `/api/audit/verify`, `/api/receipts/{id}`, `/api/receipts/checkpoints`, `/api/system`.
 
+### Forced tool use on Claude
+
+Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject forced tool use. When `/v1/chat/completions` or `/v1/responses` runs on one of them, `tool_choice: "required"` or a named function is translated to Anthropic's `any`/`tool` as usual and the upstream returns 400; the gateway does not silently downgrade it to `auto`. Clients (for example the Agents SDK with a required tool) should send `auto` for these models (Anthropic recommends `auto` with strict tool use), or be routed to an earlier model.
+
 Errors use the Anthropic envelope `{"type":"error","error":{"type":"…","message":"…"}}` (OpenAI envelope on OpenAI endpoints).

@@ -112,7 +112,7 @@ func (p *Vertex) Send(ctx context.Context, r *Request) (*http.Response, error) {
 // ListModels: Vertex has no API listing the Claude versions enabled in a
 // project, so return the publisher's current lineup for convenience.
 func (p *Vertex) ListModels(ctx context.Context) ([]DiscoveredModel, error) {
-	return nil, errors.New("Vertex does not list enabled Claude models; add them by ID (e.g. claude-sonnet-4-5@20250929)")
+	return nil, errors.New("Vertex does not list enabled Claude models; add them by ID (e.g. claude-sonnet-5-5, or claude-haiku-4-5@20251001 for older models)")
 }
 
 // newGoogleOpenAI builds the OpenAI-compatible provider for Gemini (AI Studio

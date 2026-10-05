@@ -418,38 +418,58 @@ func (a *API) SkillRoutes(mux *http.ServeMux) {
 			if err != nil {
 				return nil, err
 			}
-			it, err := a.installedFor(c, p, c.Param("id"))
+			items, err := a.installedItems(c, p, "skill", c.Param("id"))
 			if err != nil {
 				return nil, err
 			}
-			return rawResponse{}, writeSkillZip(c, a, it, it.ApprovedVersion, w)
+			if len(items) == 0 {
+				return nil, util.ErrNotFound
+			}
+			return rawResponse{}, writeSkillZip(c, a, &items[0].RegistryItem, items[0].EffectiveVersion, w)
 		})(w, r)
 	})
 }
 
-const installedSkillsSQL = `SELECT DISTINCT ON (i.id) i.* FROM registry_items i JOIN installations x ON x.item_id=i.id
-	WHERE i.kind='skill' AND i.approved_version<>'' AND i.status<>'deprecated' AND i.org_id=$1
+// installedItem is a registry item installed for a caller, with the version
+// that applies to it.
+type installedItem struct {
+	store.RegistryItem
+	EffectiveVersion string `db:"effective_version"`
+}
+
+// installedItems lists approved items of a kind installed for the caller's
+// org, team or project. When an item is installed at several of those scopes
+// the most specific installation (project, then team, then org) decides the
+// version: its pinned version, or else the item's approved version.
+func (a *API) installedItems(c *Ctx, p *auth.Principal, kind, itemID string) ([]installedItem, error) {
+	q := `SELECT DISTINCT ON (i.id) i.*, CASE WHEN x.pinned THEN x.version ELSE i.approved_version END AS effective_version
+	FROM registry_items i JOIN installations x ON x.item_id=i.id
+	WHERE i.kind=$4 AND i.approved_version<>'' AND i.status<>'deprecated' AND i.org_id=$1
 	AND ((x.scope_type='org' AND x.scope_id=$1) OR (x.scope_type='team' AND x.scope_id=$2) OR (x.scope_type='project' AND x.scope_id=$3))`
+	args := []any{p.OrgID, p.TeamID, p.ProjectID, kind}
+	if itemID != "" {
+		args = append(args, itemID)
+		q += ` AND i.id=$5`
+	}
+	q += ` ORDER BY i.id, CASE x.scope_type WHEN 'project' THEN 0 WHEN 'team' THEN 1 ELSE 2 END`
+	return store.List[installedItem](c, a.St.Pool, q, args...)
+}
 
 func (a *API) clientSkills(c *Ctx) (any, error) {
 	p, err := a.Res.FromKey(c, auth.BearerToken(c.R), "gateway")
 	if err != nil {
 		return nil, err
 	}
-	items, err := store.List[store.RegistryItem](c, a.St.Pool, installedSkillsSQL, p.OrgID, p.TeamID, p.ProjectID)
+	items, err := a.installedItems(c, p, "skill", "")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
-		out = append(out, map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.ApprovedVersion,
+		out = append(out, map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.EffectiveVersion,
 			"download_url": a.Cfg.PublicURL + "/v1/skills/" + it.ID + "/download"})
 	}
 	return map[string]any{"data": out}, nil
-}
-
-func (a *API) installedFor(c *Ctx, p *auth.Principal, id string) (*store.RegistryItem, error) {
-	return store.Get[store.RegistryItem](c, a.St.Pool, installedSkillsSQL+` AND i.id=$4`, p.OrgID, p.TeamID, p.ProjectID, id)
 }
 
 // getReceipt returns a verified Proof-of-Inference receipt to anyone who can see the request log.

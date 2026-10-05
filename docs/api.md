@@ -34,7 +34,7 @@ Policy: `/api/orgs/{org}/guardrails`, `/api/guardrails/{id}`, `POST /api/guardra
 
 Identity: `/api/orgs/{org}/idps`, `/api/idps/{id}`, `POST /api/idps/{id}/scim-token`; SCIM at `/scim/v2/{Users,Groups,ServiceProviderConfig}`.
 
-Registry: `/api/orgs/{org}/registry` (`view=marketplace|review`, `kind`, `q`), `/api/registry/{id}`, `…/versions`, `…/submit`, `…/review`, `…/install`, `…/rate`, `…/download`, `DELETE /api/installations/{id}`. Agents: `/api/orgs/{org}/agents`, `/api/agents/{id}`.
+Registry: `/api/orgs/{org}/registry` (`view=marketplace|review`, `kind`, `q`), `/api/registry/{id}`, `…/versions`, `…/submit`, `…/review`, `…/install` (optional `version` pins an approved version), `…/rate`, `…/download`, `PATCH /api/installations/{id}` (`{"version":"1.2.0"}` pins, `{"version":""}` follows the approved version), `DELETE /api/installations/{id}`. Clients get the version from the most specific installation for their key (project, then team, then org). Agents: `/api/orgs/{org}/agents`, `/api/agents/{id}`.
 
 Rollouts: `/api/rollouts`, `/api/rollouts/{id}`, `POST /api/rollouts/{id}/{pause|resume|advance|promote|rollback}` (`rollback` on a promoted rollout restores the routing it replaced).
 

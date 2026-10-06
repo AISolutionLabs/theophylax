@@ -242,13 +242,20 @@ type RegistryVersion struct {
 	Changelog string          `db:"changelog" json:"changelog"`
 	CreatedBy *string         `db:"created_by" json:"created_by"`
 	CreatedAt time.Time       `db:"created_at" json:"created_at"`
+	// ApprovedAt is set when this version is approved; only approved
+	// versions can be pinned by an installation.
+	ApprovedAt *time.Time `db:"approved_at" json:"approved_at"`
+	ApprovedBy *string    `db:"approved_by" json:"approved_by"`
 }
 
 type Installation struct {
-	ID          string    `db:"id" json:"id"`
-	ItemID      string    `db:"item_id" json:"item_id"`
-	OrgID       string    `db:"org_id" json:"org_id"`
-	Version     string    `db:"version" json:"version"`
+	ID      string `db:"id" json:"id"`
+	ItemID  string `db:"item_id" json:"item_id"`
+	OrgID   string `db:"org_id" json:"org_id"`
+	Version string `db:"version" json:"version"`
+	// Pinned installations serve Version; the others follow the item's
+	// approved version (Version then records what was approved at install).
+	Pinned      bool      `db:"pinned" json:"pinned"`
 	ScopeType   string    `db:"scope_type" json:"scope_type"`
 	ScopeID     string    `db:"scope_id" json:"scope_id"`
 	InstalledBy *string   `db:"installed_by" json:"installed_by"`

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Bot, Download, FileCode2, Puzzle, Server, Star, Store, Wand2 } from 'lucide-react'
-import { get, post, type RegistryItem, type RegistryVersion } from '../lib/api'
+import { get, patch, post, type Installation, type RegistryItem, type RegistryVersion } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useScopeOptions } from '../lib/queries'
 import { fmtAgo, fmtCompact, kindLabel } from '../lib/format'
@@ -72,13 +72,19 @@ function Featured({ item, onOpen }: { item: RegistryItem; onOpen: () => void }) 
 }
 
 export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () => void }) {
-  const d = useQuery({ queryKey: ['registry-item', item.id], queryFn: () => get<{ item: RegistryItem; versions: RegistryVersion[]; installations: any[]; my_rating?: number; can_publish: boolean; can_review: boolean }>(`/api/registry/${item.id}`) })
+  const d = useQuery({ queryKey: ['registry-item', item.id], queryFn: () => get<{ item: RegistryItem; versions: RegistryVersion[]; installations: Installation[]; my_rating?: number; can_publish: boolean; can_review: boolean }>(`/api/registry/${item.id}`) })
   const scopes = useScopeOptions()
   const { can } = useApp()
   const [tab, setTab] = useState<'about' | 'install' | 'versions'>('about')
   const [scope, setScope] = useState('')
-  const install = useAction(() => { const [st, sid] = scope.split(':'); return post<any>(`/api/registry/${item.id}/install`, { scope_type: st, scope_id: sid }) },
+  const [pin, setPin] = useState('')
+  const install = useAction(() => { const [st, sid] = scope.split(':'); return post<any>(`/api/registry/${item.id}/install`, { scope_type: st, scope_id: sid, version: pin }) },
     { done: (r: any) => (r.agent_id ? 'Installed and created an agent' : 'Installed'), invalidate: [['registry-item'], ['marketplace'], ['agents']] })
+  const repin = useAction((x: { id: string; version: string }) => patch<Installation>(`/api/installations/${x.id}`, { version: x.version }),
+    { done: (r) => (r.pinned ? `Pinned to v${r.version}` : 'Now follows the approved version'), invalidate: [['registry-item']] })
+  // Versions an installation may pin: the approved one and any approved before it.
+  const approved = (d.data?.versions ?? []).filter((x) => x.approved_at || x.version === item.approved_version)
+  const pinOptions = [{ value: '', label: `Follow approved (v${item.approved_version})` }, ...approved.map((x) => ({ value: x.version, label: `Pin v${x.version}` }))]
   const rate = useAction((n: number) => post(`/api/registry/${item.id}/rate`, { rating: n }), { done: 'Thanks for rating', invalidate: [['registry-item'], ['marketplace']] })
   const v = d.data?.versions.find((x) => x.version === (item.approved_version || item.latest_version))
   const c = v?.content ?? {}
@@ -104,8 +110,10 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
             <div className="stack">
               {installable.length ? (
                 <div className="row" style={{ alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}><Field label="Install for" hint={item.kind === 'agent' ? 'Installing into a team or project creates a managed agent there.' : 'Installed skills are listed to clients in that scope via /v1/skills.'}>
+                  <div style={{ flex: 1 }}><Field label="Install for" hint={item.kind === 'agent' ? 'Installing into a team or project creates a managed agent there.' : item.kind === 'mcp_server' ? 'Installed MCP servers are listed to clients in that scope via /v1/mcp/servers.' : 'Installed skills are listed to clients in that scope via /v1/skills.'}>
                     <Select value={scope} onChange={(e) => setScope(e.target.value)} options={[{ value: '', label: 'Choose where…' }, ...installable]} /></Field></div>
+                  <div style={{ flex: 1 }}><Field label="Version" hint="Following picks up each newly approved version. Pin to hold this scope on one version.">
+                    <Select value={pin} onChange={(e) => setPin(e.target.value)} options={pinOptions} /></Field></div>
                   <div style={{ marginBottom: 16 }}><Button variant="primary" disabled={!scope} busy={install.isPending} onClick={() => install.mutate(undefined)}>Install</Button></div>
                 </div>
               ) : <div className="callout">Ask a team or project admin to install this for you.</div>}
@@ -116,14 +124,33 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
                   <CodeBlock code={`mkdir -p ~/.claude/skills && cd ~/.claude/skills\ncurl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" ${base}/v1/skills \\\n  | jq -r '.data[].download_url' \\\n  | while read u; do curl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" "$u" -o s.zip && unzip -oq s.zip && rm s.zip; done`} />
                 </>
               )}
+              {item.kind === 'mcp_server' && (
+                <>
+                  <h3>Sync into Claude Code</h3>
+                  <p className="muted">Writes the MCP servers installed for a developer's project, team and org into a project's <code>.mcp.json</code>. Stored tokens stay in the gateway; servers that need one are marked <code>requires_authorization</code>.</p>
+                  <CodeBlock code={`curl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" ${base}/v1/mcp/servers | jq '.mcp_json' > .mcp.json`} />
+                </>
+              )}
               <h3>Installed in</h3>
-              {d.data?.installations.length ? <table className="tbl panel"><tbody>{d.data.installations.map((x: any) => <tr key={x.id}><td>{x.scope_name}</td><td className="dim">v{x.version}</td><td className="dim">{fmtAgo(x.created_at)}</td></tr>)}</tbody></table> : <p className="muted">Not installed anywhere yet.</p>}
+              {d.data?.installations.length ? (
+                <>
+                  <p className="muted">The most specific installation wins: a project's overrides its team's, which overrides the org's. To stage a rollout, pin the org, then pin a team to the new version.</p>
+                  <table className="tbl panel"><tbody>{d.data.installations.map((x) => (
+                    <tr key={x.id}>
+                      <td>{x.scope_name} <span className="dim">· {x.scope_type}</span></td>
+                      <td>{x.pinned ? <Badge>pinned v{x.version}</Badge> : <span className="dim">follows approved (v{item.approved_version})</span>}</td>
+                      <td>{can({ type: x.scope_type, id: x.scope_id }, 'admin') && <Select value={x.pinned ? x.version : ''} onChange={(e) => repin.mutate({ id: x.id, version: e.target.value })} options={pinOptions} aria-label={`Version for ${x.scope_name}`} />}</td>
+                      <td className="dim">{fmtAgo(x.created_at)}</td>
+                    </tr>
+                  ))}</tbody></table>
+                </>
+              ) : <p className="muted">Not installed anywhere yet.</p>}
             </div>
           )}
           {tab === 'versions' && (
             <table className="tbl panel">
               <thead><tr><th>Version</th><th>Changes</th><th>Digest</th><th>Published</th></tr></thead>
-              <tbody>{d.data?.versions.map((x) => <tr key={x.id}><td>v{x.version} {x.version === item.approved_version && <Badge tone="ok">live</Badge>}</td><td>{x.changelog || <span className="dim">—</span>}</td><td className="mono dim" title={x.digest}>{x.digest.slice(0, 19)}…</td><td className="dim">{fmtAgo(x.created_at)}</td></tr>)}</tbody>
+              <tbody>{d.data?.versions.map((x) => <tr key={x.id}><td>v{x.version} {x.version === item.approved_version ? <Badge tone="ok">live</Badge> : x.approved_at ? <Badge>approved</Badge> : null}</td><td>{x.changelog || <span className="dim">—</span>}</td><td className="mono dim" title={x.digest}>{x.digest.slice(0, 19)}…</td><td className="dim">{fmtAgo(x.created_at)}</td></tr>)}</tbody>
             </table>
           )}
         </>

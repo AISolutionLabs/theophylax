@@ -265,6 +265,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/registry/{id}/review", h(a.reviewItem))
 	mux.HandleFunc("POST /api/registry/{id}/install", h(a.installItem))
 	mux.HandleFunc("DELETE /api/installations/{id}", h(a.uninstall))
+	mux.HandleFunc("PATCH /api/installations/{id}", h(a.updateInstallation))
 	mux.HandleFunc("POST /api/registry/{id}/rate", h(a.rateItem))
 	mux.HandleFunc("GET /api/registry/{id}/download", a.downloadItem)
 	mux.HandleFunc("GET /api/orgs/{org}/agents", h(a.listAgents))

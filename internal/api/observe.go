@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -412,44 +413,126 @@ func (a *API) system(c *Ctx) (any, error) {
 
 func (a *API) SkillRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/skills", a.wrap(false, a.clientSkills))
+	mux.HandleFunc("GET /v1/mcp/servers", a.wrap(false, a.clientMCPServers))
 	mux.HandleFunc("GET /v1/skills/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		a.wrap(false, func(c *Ctx) (any, error) {
 			p, err := a.Res.FromKey(c, auth.BearerToken(r), "gateway")
 			if err != nil {
 				return nil, err
 			}
-			it, err := a.installedFor(c, p, c.Param("id"))
+			items, err := a.installedItems(c, p, "skill", c.Param("id"))
 			if err != nil {
 				return nil, err
 			}
-			return rawResponse{}, writeSkillZip(c, a, it, it.ApprovedVersion, w)
+			if len(items) == 0 {
+				return nil, util.ErrNotFound
+			}
+			return rawResponse{}, writeSkillZip(c, a, &items[0].RegistryItem, items[0].EffectiveVersion, w)
 		})(w, r)
 	})
 }
 
-const installedSkillsSQL = `SELECT DISTINCT ON (i.id) i.* FROM registry_items i JOIN installations x ON x.item_id=i.id
-	WHERE i.kind='skill' AND i.approved_version<>'' AND i.status<>'deprecated' AND i.org_id=$1
+// installedItem is a registry item installed for a caller, with the version
+// that applies to it.
+type installedItem struct {
+	store.RegistryItem
+	EffectiveVersion string `db:"effective_version"`
+}
+
+// installedItems lists approved items of a kind installed for the caller's
+// org, team or project. When an item is installed at several of those scopes
+// the most specific installation (project, then team, then org) decides the
+// version: its pinned version, or else the item's approved version.
+func (a *API) installedItems(c *Ctx, p *auth.Principal, kind, itemID string) ([]installedItem, error) {
+	q := `SELECT DISTINCT ON (i.id) i.*, CASE WHEN x.pinned THEN x.version ELSE i.approved_version END AS effective_version
+	FROM registry_items i JOIN installations x ON x.item_id=i.id
+	WHERE i.kind=$4 AND i.approved_version<>'' AND i.status<>'deprecated' AND i.org_id=$1
 	AND ((x.scope_type='org' AND x.scope_id=$1) OR (x.scope_type='team' AND x.scope_id=$2) OR (x.scope_type='project' AND x.scope_id=$3))`
+	args := []any{p.OrgID, p.TeamID, p.ProjectID, kind}
+	if itemID != "" {
+		args = append(args, itemID)
+		q += ` AND i.id=$5`
+	}
+	q += ` ORDER BY i.id, CASE x.scope_type WHEN 'project' THEN 0 WHEN 'team' THEN 1 ELSE 2 END`
+	return store.List[installedItem](c, a.St.Pool, q, args...)
+}
+
+// clientMCPServers lists the approved MCP servers installed for the caller's
+// scope, at the version that applies to it, plus the same servers as an
+// .mcp.json document for Claude Code. Stored authorization tokens stay in the
+// gateway (they are only injected for managed agents); servers that have one
+// are marked requires_authorization.
+func (a *API) clientMCPServers(c *Ctx) (any, error) {
+	p, err := a.Res.FromKey(c, auth.BearerToken(c.R), "gateway")
+	if err != nil {
+		return nil, err
+	}
+	items, err := a.installedItems(c, p, "mcp_server", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(items))
+	servers := map[string]any{}
+	for _, it := range items {
+		var raw json.RawMessage
+		if err := a.St.Pool.QueryRow(c, `SELECT content FROM registry_versions WHERE item_id=$1 AND version=$2`, it.ID, it.EffectiveVersion).Scan(&raw); err != nil {
+			continue
+		}
+		var content struct {
+			Transport string   `json:"transport"`
+			URL       string   `json:"url"`
+			Command   string   `json:"command"`
+			Args      []string `json:"args"`
+			HasToken  bool     `json:"has_authorization_token"`
+		}
+		_ = json.Unmarshal(raw, &content)
+		entry := map[string]any{}
+		switch {
+		case content.URL != "":
+			if content.Transport != "sse" {
+				content.Transport = "http"
+			}
+			entry["type"], entry["url"] = content.Transport, content.URL
+		case content.Command != "":
+			content.Transport = "stdio"
+			cmd, args := content.Command, content.Args
+			if args == nil {
+				if f := strings.Fields(cmd); len(f) > 0 {
+					cmd, args = f[0], f[1:]
+				}
+			}
+			entry["type"], entry["command"], entry["args"] = "stdio", cmd, args
+		default:
+			continue
+		}
+		servers[it.Slug] = entry
+		item := map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.EffectiveVersion,
+			"transport": content.Transport, "requires_authorization": content.HasToken}
+		for k, v := range entry {
+			if k != "type" {
+				item[k] = v
+			}
+		}
+		out = append(out, item)
+	}
+	return map[string]any{"data": out, "mcp_json": map[string]any{"mcpServers": servers}}, nil
+}
 
 func (a *API) clientSkills(c *Ctx) (any, error) {
 	p, err := a.Res.FromKey(c, auth.BearerToken(c.R), "gateway")
 	if err != nil {
 		return nil, err
 	}
-	items, err := store.List[store.RegistryItem](c, a.St.Pool, installedSkillsSQL, p.OrgID, p.TeamID, p.ProjectID)
+	items, err := a.installedItems(c, p, "skill", "")
 	if err != nil {
 		return nil, err
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
-		out = append(out, map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.ApprovedVersion,
+		out = append(out, map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.EffectiveVersion,
 			"download_url": a.Cfg.PublicURL + "/v1/skills/" + it.ID + "/download"})
 	}
 	return map[string]any{"data": out}, nil
-}
-
-func (a *API) installedFor(c *Ctx, p *auth.Principal, id string) (*store.RegistryItem, error) {
-	return store.Get[store.RegistryItem](c, a.St.Pool, installedSkillsSQL+` AND i.id=$4`, p.OrgID, p.TeamID, p.ProjectID, id)
 }
 
 // getReceipt returns a verified Proof-of-Inference receipt to anyone who can see the request log.

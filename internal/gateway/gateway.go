@@ -378,16 +378,8 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 				nb = providers.AnthropicToOpenAIRequest(body)
 			}
 		}
-		hdr := clientHdr
-		if _, ok := nb["mcp_servers"]; ok {
-			if prov.Kind() != providers.KindAnthropic {
-				nb = shallowCopy(nb)
-				delete(nb, "mcp_servers")
-			} else {
-				hdr = clientHdr.Clone()
-				hdr.Add("anthropic-beta", "mcp-client-2025-04-04")
-			}
-		}
+		var hdr http.Header
+		nb, hdr = applyMCP(nb, clientHdr, prov.Kind())
 		t0 := time.Now()
 		resp, lastErr = prov.Send(r.Context(), &providers.Request{Body: nb, Stream: stream, UpstreamModel: upstream, Header: hdr})
 		if lastErr == nil {

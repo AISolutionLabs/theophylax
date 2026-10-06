@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -227,11 +228,16 @@ func (a *API) createRegistryItem(c *Ctx) (any, error) {
 		it.Status, it.ApprovedVersion, it.ReviewedBy = "approved", in.Version, &uid
 	}
 	sum := sha256.Sum256(content)
+	rv := &store.RegistryVersion{ID: util.NewID("rv"), ItemID: it.ID, Version: in.Version, Content: content, Digest: "sha256:" + hex.EncodeToString(sum[:]), Changelog: in.Changelog, CreatedBy: &uid}
+	if autoApprove {
+		now := time.Now()
+		rv.ApprovedAt, rv.ApprovedBy = &now, &uid
+	}
 	err = a.St.Tx(c, func(tx pgx.Tx) error {
 		if err := a.St.Insert(c, tx, "registry_items", it); err != nil {
 			return err
 		}
-		return a.St.Insert(c, tx, "registry_versions", &store.RegistryVersion{ID: util.NewID("rv"), ItemID: it.ID, Version: in.Version, Content: content, Digest: "sha256:" + hex.EncodeToString(sum[:]), Changelog: in.Changelog, CreatedBy: &uid})
+		return a.St.Insert(c, tx, "registry_versions", rv)
 	})
 	if err != nil {
 		return nil, err
@@ -381,13 +387,18 @@ func (a *API) publishVersion(c *Ctx) (any, error) {
 	sum := sha256.Sum256(content)
 	v := &store.RegistryVersion{ID: util.NewID("rv"), ItemID: it.ID, Version: in.Version, Content: content, Digest: "sha256:" + hex.EncodeToString(sum[:]), Changelog: in.Changelog, CreatedBy: &uid}
 	org := auth.Scope{Type: "org", ID: it.OrgID, OrgID: it.OrgID}
+	approve := in.Submit && c.P.Can(org, "admin")
+	if approve {
+		now := time.Now()
+		v.ApprovedAt, v.ApprovedBy = &now, &uid
+	}
 	err = a.St.Tx(c, func(tx pgx.Tx) error {
 		if err := a.St.Insert(c, tx, "registry_versions", v); err != nil {
 			return err
 		}
 		it.LatestVersion = in.Version
 		switch {
-		case in.Submit && c.P.Can(org, "admin"):
+		case approve:
 			it.Status, it.ApprovedVersion, it.ReviewedBy = "approved", in.Version, &uid
 		case in.Submit:
 			it.Status = "pending_review"
@@ -449,7 +460,17 @@ func (a *API) reviewItem(c *Ctx) (any, error) {
 		return nil, badReq("decision must be approve or reject")
 	}
 	it.ReviewedBy, it.ReviewNote = &uid, in.Note
-	if err := a.St.Update(c, a.St.Pool, "registry_items", it); err != nil {
+	err = a.St.Tx(c, func(tx pgx.Tx) error {
+		if err := a.St.Update(c, tx, "registry_items", it); err != nil {
+			return err
+		}
+		if in.Decision != "approve" {
+			return nil
+		}
+		_, err := tx.Exec(c, `UPDATE registry_versions SET approved_at=now(), approved_by=$3 WHERE item_id=$1 AND version=$2 AND approved_at IS NULL`, it.ID, it.ApprovedVersion, uid)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	c.Audit("registry.review", it.OrgID, "registry_item", it.ID, map[string]string{"decision": in.Decision, "version": it.LatestVersion, "note": in.Note})
@@ -480,11 +501,14 @@ func (a *API) installItem(c *Ctx) (any, error) {
 	if err := c.Require(s, "admin"); err != nil {
 		return nil, err
 	}
-	if in.Version == "" {
+	pinned := in.Version != ""
+	if !pinned {
 		in.Version = it.ApprovedVersion
+	} else if !a.versionApproved(c, it, in.Version) {
+		return nil, badReq("only an approved version can be pinned")
 	}
 	uid := c.P.UserID()
-	inst := &store.Installation{ID: util.NewID("ins"), ItemID: it.ID, OrgID: it.OrgID, Version: in.Version, ScopeType: s.Type, ScopeID: s.ID, InstalledBy: &uid}
+	inst := &store.Installation{ID: util.NewID("ins"), ItemID: it.ID, OrgID: it.OrgID, Version: in.Version, Pinned: pinned, ScopeType: s.Type, ScopeID: s.ID, InstalledBy: &uid}
 	err = a.St.Tx(c, func(tx pgx.Tx) error {
 		if err := a.St.Insert(c, tx, "installations", inst); err != nil {
 			return err
@@ -519,9 +543,63 @@ func (a *API) installItem(c *Ctx) (any, error) {
 			agentID = ag.ID
 		}
 	}
-	c.Audit("registry.install", it.OrgID, s.Type, s.ID, map[string]string{"item": it.Name, "version": in.Version, "agent_id": agentID})
+	c.Audit("registry.install", it.OrgID, s.Type, s.ID, map[string]any{"item": it.Name, "version": in.Version, "pinned": pinned, "agent_id": agentID})
 	a.changed(c)
 	return created{map[string]any{"installation": inst, "agent_id": agentID}}, nil
+}
+
+// versionApproved reports whether ver of the item is, or once was, approved.
+func (a *API) versionApproved(c *Ctx, it *store.RegistryItem, ver string) bool {
+	if ver == it.ApprovedVersion {
+		return true
+	}
+	var ok bool
+	_ = a.St.Pool.QueryRow(c, `SELECT EXISTS(SELECT 1 FROM registry_versions WHERE item_id=$1 AND version=$2 AND approved_at IS NOT NULL)`, it.ID, ver).Scan(&ok)
+	return ok
+}
+
+// updateInstallation pins an installation to an approved version, or with an
+// empty version makes it follow the item's approved version again. Pinning
+// the org-wide installation and pinning a team or project to a newer version
+// stages a rollout; pinning back to an earlier version rolls it back.
+func (a *API) updateInstallation(c *Ctx) (any, error) {
+	inst, err := store.GetByID[store.Installation](c, a.St.Pool, "installations", c.Param("id"))
+	if err != nil {
+		return nil, err
+	}
+	s, err := a.scopeOf(c, inst.ScopeType, inst.ScopeID)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Require(s, "admin"); err != nil {
+		return nil, err
+	}
+	it, err := store.GetByID[store.RegistryItem](c, a.St.Pool, "registry_items", inst.ItemID)
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Version *string `json:"version"`
+	}
+	if err := c.Decode(&in); err != nil {
+		return nil, err
+	}
+	if in.Version == nil {
+		return nil, badReq(`version is required: an approved version to pin, or "" to follow the approved version`)
+	}
+	if *in.Version == "" {
+		inst.Pinned, inst.Version = false, it.ApprovedVersion
+	} else {
+		if !a.versionApproved(c, it, *in.Version) {
+			return nil, badReq("only an approved version can be pinned")
+		}
+		inst.Pinned, inst.Version = true, *in.Version
+	}
+	if err := a.St.Update(c, a.St.Pool, "installations", inst); err != nil {
+		return nil, err
+	}
+	c.Audit("registry.pin", inst.OrgID, s.Type, s.ID, map[string]any{"item_id": it.ID, "version": inst.Version, "pinned": inst.Pinned})
+	return inst, nil
 }
 
 func (a *API) uninstall(c *Ctx) (any, error) {

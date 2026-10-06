@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -412,6 +413,7 @@ func (a *API) system(c *Ctx) (any, error) {
 
 func (a *API) SkillRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/skills", a.wrap(false, a.clientSkills))
+	mux.HandleFunc("GET /v1/mcp/servers", a.wrap(false, a.clientMCPServers))
 	mux.HandleFunc("GET /v1/skills/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		a.wrap(false, func(c *Ctx) (any, error) {
 			p, err := a.Res.FromKey(c, auth.BearerToken(r), "gateway")
@@ -453,6 +455,67 @@ func (a *API) installedItems(c *Ctx, p *auth.Principal, kind, itemID string) ([]
 	}
 	q += ` ORDER BY i.id, CASE x.scope_type WHEN 'project' THEN 0 WHEN 'team' THEN 1 ELSE 2 END`
 	return store.List[installedItem](c, a.St.Pool, q, args...)
+}
+
+// clientMCPServers lists the approved MCP servers installed for the caller's
+// scope, at the version that applies to it, plus the same servers as an
+// .mcp.json document for Claude Code. Stored authorization tokens stay in the
+// gateway (they are only injected for managed agents); servers that have one
+// are marked requires_authorization.
+func (a *API) clientMCPServers(c *Ctx) (any, error) {
+	p, err := a.Res.FromKey(c, auth.BearerToken(c.R), "gateway")
+	if err != nil {
+		return nil, err
+	}
+	items, err := a.installedItems(c, p, "mcp_server", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(items))
+	servers := map[string]any{}
+	for _, it := range items {
+		var raw json.RawMessage
+		if err := a.St.Pool.QueryRow(c, `SELECT content FROM registry_versions WHERE item_id=$1 AND version=$2`, it.ID, it.EffectiveVersion).Scan(&raw); err != nil {
+			continue
+		}
+		var content struct {
+			Transport string   `json:"transport"`
+			URL       string   `json:"url"`
+			Command   string   `json:"command"`
+			Args      []string `json:"args"`
+			HasToken  bool     `json:"has_authorization_token"`
+		}
+		_ = json.Unmarshal(raw, &content)
+		entry := map[string]any{}
+		switch {
+		case content.URL != "":
+			if content.Transport != "sse" {
+				content.Transport = "http"
+			}
+			entry["type"], entry["url"] = content.Transport, content.URL
+		case content.Command != "":
+			content.Transport = "stdio"
+			cmd, args := content.Command, content.Args
+			if args == nil {
+				if f := strings.Fields(cmd); len(f) > 0 {
+					cmd, args = f[0], f[1:]
+				}
+			}
+			entry["type"], entry["command"], entry["args"] = "stdio", cmd, args
+		default:
+			continue
+		}
+		servers[it.Slug] = entry
+		item := map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.EffectiveVersion,
+			"transport": content.Transport, "requires_authorization": content.HasToken}
+		for k, v := range entry {
+			if k != "type" {
+				item[k] = v
+			}
+		}
+		out = append(out, item)
+	}
+	return map[string]any{"data": out, "mcp_json": map[string]any{"mcpServers": servers}}, nil
 }
 
 func (a *API) clientSkills(c *Ctx) (any, error) {

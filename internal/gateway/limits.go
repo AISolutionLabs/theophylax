@@ -202,14 +202,12 @@ func (rl *RateLimiter) win(key string, now time.Time) *rlWindow {
 	return w
 }
 
-// Allow checks and, if allowed, counts a request. Returns seconds to wait when limited.
-func (rl *RateLimiter) Allow(key string, rpm, tpm int) (bool, int, string) {
+// check reports whether a request against key is within rpm/tpm, without
+// counting it. Caller must hold rl.mu.
+func (rl *RateLimiter) check(key string, rpm, tpm int, now time.Time) (bool, int, string) {
 	if rpm <= 0 && tpm <= 0 {
 		return true, 0, ""
 	}
-	now := time.Now()
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
 	w := rl.win(key, now)
 	frac := float64(now.Unix()%60) / 60
 	estR := float64(w.prev.reqs())*(1-frac) + float64(w.cur.reqs())
@@ -221,8 +219,47 @@ func (rl *RateLimiter) Allow(key string, rpm, tpm int) (bool, int, string) {
 	if tpm > 0 && estT >= float64(tpm) {
 		return false, retry, "tokens per minute"
 	}
-	w.cur.pR++
 	return true, 0, ""
+}
+
+// Allow checks and, if allowed, counts a request. Returns seconds to wait when limited.
+func (rl *RateLimiter) Allow(key string, rpm, tpm int) (bool, int, string) {
+	now := time.Now()
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	ok, retry, why := rl.check(key, rpm, tpm, now)
+	if ok {
+		rl.win(key, now).cur.pR++
+	}
+	return ok, retry, why
+}
+
+// Limit pairs a counter key with its per-minute ceilings.
+type Limit struct {
+	Key      string
+	RPM, TPM int
+}
+
+// AllowAll enforces several limits atomically: it rejects on the first limit
+// that is exceeded without counting against any limit, and only counts one
+// request against every limit when all of them pass. This avoids charging a
+// request to (say) the key and project windows when the org window is the one
+// that rejects it.
+func (rl *RateLimiter) AllowAll(limits []Limit) (bool, int, string, string) {
+	now := time.Now()
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for _, l := range limits {
+		if ok, retry, why := rl.check(l.Key, l.RPM, l.TPM, now); !ok {
+			return false, retry, why, l.Key
+		}
+	}
+	for _, l := range limits {
+		if l.RPM > 0 || l.TPM > 0 {
+			rl.win(l.Key, now).cur.pR++
+		}
+	}
+	return true, 0, "", ""
 }
 
 func (rl *RateLimiter) AddTokens(key string, n int) {

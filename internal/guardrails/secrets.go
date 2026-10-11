@@ -39,7 +39,11 @@ var secretDetectors = map[string]secretDetector{
 	"azure_client_secret": {re: regexp.MustCompile(`\b[A-Za-z0-9_~.-]{3}\dQ~[A-Za-z0-9_~.-]{31,34}\b`)},
 	"connection_string":   {re: regexp.MustCompile(`(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqps?|mssql|sqlserver)://[^\s:@/]+:([^\s@/]+)@`), group: true},
 	"bearer_token":        {re: regexp.MustCompile(`(?i)\bauthorization["']?\s*[:=]\s*["']?bearer\s+([A-Za-z0-9._~+/-]{20,}=*)`), group: true},
-	"password_assignment": {re: regexp.MustCompile("(?i)\\b(?:password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)\\b[\"']?\\s*[:=]\\s*[\"']?([^\\s\"'`,;)}]{8,})"), group: true, check: looksSecret},
+	// The key may be a compound identifier (DB_PASSWORD, jwt.secret, X-Api-Key),
+	// so the keyword is allowed to be a suffix joined by _, - or . rather than
+	// requiring a bare word boundary on its left (a plain \b never matches
+	// between '_' and the keyword, which let DB_PASSWORD=… through).
+	"password_assignment": {re: regexp.MustCompile("(?i)(?:^|[^\\w-])[\\w.-]{0,40}?(?:password|passwd|pwd|passphrase|secret|credentials?|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)s?[\"']?\\s*[:=]\\s*[\"']?([^\\s\"'`,;)}]{6,})"), group: true, check: looksAssignedSecret},
 	"high_entropy":        {re: regexp.MustCompile(`\b[A-Za-z0-9+/_=-]{32,200}\b`), check: highEntropy},
 }
 
@@ -100,6 +104,40 @@ func looksSecret(v string) bool {
 }
 
 var identLike = regexp.MustCompile(`^(?:[a-z_][a-z0-9_]*\.)*[a-z_][a-z0-9_]*(?:\(\))?$|^[A-Z_][A-Z0-9_]*$`)
+
+// codeRefLike matches values that are code references rather than literal
+// secrets: dotted paths (process.env.X, config.get, self.password). It is a
+// prefix match because the value capture stops at '(' or '"', so a call like
+// os.getenv("X") arrives truncated as "os.getenv(".
+var codeRefLike = regexp.MustCompile(`^[A-Za-z_$][\w$]*\.[A-Za-z_$]`)
+
+// codeIdentLike matches values shaped like source identifiers rather than
+// secrets: camelCase/lowercase alphabetic names, snake_case, and CONSTANT_CASE
+// env-var names. A real credential almost always mixes in digits or symbols in
+// a way these do not.
+var codeIdentLike = regexp.MustCompile(`^[a-z][a-zA-Z]*$|^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$`)
+
+// looksAssignedSecret decides whether the value captured from a <key>=<value>
+// assignment (where the key already named a credential) is a literal secret.
+// Unlike looksSecret it does not require high entropy — the key name is strong
+// evidence on its own — but it still rejects placeholders, environment/file
+// references and code identifiers so ordinary source like `password = userPass`
+// or `api_key: process.env.KEY` is left untouched.
+func looksAssignedSecret(v string) bool {
+	if v == "" || placeholderish.MatchString(v) || strings.HasPrefix(v, "[REDACTED:") {
+		return false
+	}
+	switch v[0] {
+	case '$', '%', '<', '@', '#', '&':
+		return false // ${VAR}, %VAR%, <value>, @ref, interpolations
+	}
+	// A '(' means a truncated call expression (the capture stops at ')'), e.g.
+	// os.getenv( or config.get( — a reference, not a literal secret.
+	if strings.HasPrefix(v, "{{") || strings.ContainsRune(v, '(') || codeRefLike.MatchString(v) || codeIdentLike.MatchString(v) {
+		return false
+	}
+	return len(v) >= 6
+}
 
 var hexOnly = regexp.MustCompile(`^[a-fA-F0-9]+$`)
 

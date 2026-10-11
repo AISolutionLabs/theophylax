@@ -820,11 +820,17 @@ func (g *Gateway) checkLimits(w http.ResponseWriter, snap *Snapshot, p *auth.Pri
 	if o := snap.Orgs[p.OrgID]; o != nil {
 		ls = append(ls, lim{"org:" + o.ID, o.Settings.RPM, o.Settings.TPM, "organization"})
 	}
-	for _, l := range ls {
-		if ok, retry, why := g.RL.Allow(l.key, l.rpm, l.tpm); !ok {
-			w.Header().Set("Retry-After", fmt.Sprint(retry))
-			return util.Err(429, "rate_limit_error", fmt.Sprintf("%s rate limit exceeded (%s); retry in %ds", l.what, why, retry))
-		}
+	limits := make([]Limit, len(ls))
+	whatOf := make(map[string]string, len(ls))
+	for i, l := range ls {
+		limits[i] = Limit{Key: l.key, RPM: l.rpm, TPM: l.tpm}
+		whatOf[l.key] = l.what
+	}
+	// Enforce all scopes atomically: a request rejected by one scope must not
+	// consume a count from the scopes that would have allowed it.
+	if ok, retry, why, key := g.RL.AllowAll(limits); !ok {
+		w.Header().Set("Retry-After", fmt.Sprint(retry))
+		return util.Err(429, "rate_limit_error", fmt.Sprintf("%s rate limit exceeded (%s); retry in %ds", whatOf[key], why, retry))
 	}
 	if b := g.Budgets.Exceeded(snap, p.OrgID, p.TeamID, p.UserID(), scopes); b != nil {
 		return util.Err(429, "rate_limit_error", Describe(b)+" exhausted")

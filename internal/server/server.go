@@ -29,6 +29,7 @@ import (
 	"theophylax/internal/receipts"
 	"theophylax/internal/secrets"
 	"theophylax/internal/store"
+	"theophylax/internal/util"
 	"theophylax/web"
 )
 
@@ -79,6 +80,14 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	budgets := gateway.NewBudgets(st)
 	logs := gateway.NewRequestLogger(st, budgets, cfg.LogBufferSize, cfg.StdoutRequestLogs)
 	resolver := auth.NewResolver(st, box.SessionKey(), cfg.KeyCacheTTL)
+	// Admin-configured outbound URLs (OIDC issuer discovery, guardrail webhooks
+	// and vendors) are SSRF-guarded: link-local/metadata addresses are always
+	// refused. In dev mode we relax the loopback rule so a localhost IdP or
+	// guardrail service can be used while developing.
+	if cfg.DevMode {
+		resolver.OIDC.SetHTTPClient(util.SafeHTTPClient(10*time.Second, true))
+		guard.SetHTTPClient(util.SafeHTTPClient(10*time.Second, true))
+	}
 	al := audit.New(st)
 
 	var seed []byte

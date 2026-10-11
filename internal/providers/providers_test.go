@@ -152,3 +152,28 @@ func TestOpenAIToAnthropicStream(t *testing.T) {
 		t.Fatalf("usage/stop %+v %s", s.Usage, s.stop)
 	}
 }
+
+// TestLocalProviderBaseURL covers the OpenAI-compatible local presets, including
+// forgiving forms a user is likely to paste: a trailing /v1 and a full URL after
+// the scheme. Earlier these produced .../v1/v1 and http://http//... respectively.
+func TestLocalProviderBaseURL(t *testing.T) {
+	cases := map[string]string{
+		"lmstudio://127.0.0.1:1234":                        "http://127.0.0.1:1234/v1",
+		"lmstudio://127.0.0.1:1234/v1":                     "http://127.0.0.1:1234/v1",
+		"lmstudio://http://127.0.0.1:1234/v1":              "http://127.0.0.1:1234/v1",
+		"lmstudio://https://127.0.0.1:1234/v1":             "https://127.0.0.1:1234/v1",
+		"ollama://gpu-box:11434":                           "http://gpu-box:11434/v1",
+		"vllm://host:8000/v1":                              "http://host:8000/v1",
+		"lmstudio://http://127.0.0.1:1234/v1?api_key=sk-x": "http://127.0.0.1:1234/v1",
+	}
+	for in, want := range cases {
+		c, err := ParseConn(in)
+		if err != nil {
+			t.Errorf("%q: %v", in, err)
+			continue
+		}
+		if got := c.Get("base_url"); got != want {
+			t.Errorf("%q: base_url=%q want %q", in, got, want)
+		}
+	}
+}

@@ -90,7 +90,7 @@ openai://vllm.internal:8000?base_url=http://vllm.internal:8000/v1
 
 ### Shorthand presets
 
-`groq://`, `mistral://`, `together://`, `deepseek://`, `xai://`, `openrouter://`, `fireworks://`, `cerebras://` and `perplexity://` fill in the public API base (`groq://?api_key=${env:GROQ_API_KEY}`); `ollama://gpu-box:11434`, `vllm://host:8000` and `lmstudio://host:1234` point at a local server.
+`groq://`, `mistral://`, `together://`, `deepseek://`, `xai://`, `openrouter://`, `fireworks://`, `cerebras://` and `perplexity://` fill in the public API base (`groq://?api_key=${env:GROQ_API_KEY}`); `ollama://gpu-box:11434`, `vllm://host:8000` and `lmstudio://host:1234` point at a local server. Give the local presets just `host:port` — the `http://` scheme and the `/v1` path are added for you (a trailing `/v1` or a full `http://…` URL after the scheme are tolerated too). To set the full base URL yourself, use `base_url`, e.g. `Provider=lmstudio;base_url=http://127.0.0.1:1234/v1`.
 
 ## Custom credential provider
 

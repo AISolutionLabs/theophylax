@@ -135,6 +135,21 @@ func ParseConn(s string) (*Conn, error) {
 				c.Params[normKey(key)] = vals[0]
 			}
 		}
+		// Tolerate a full URL pasted after the scheme, e.g.
+		// lmstudio://http://127.0.0.1:1234/v1 — url.Parse mangles the embedded
+		// scheme into the host. Treat the remainder as the base URL so the
+		// preset builder below does not double the scheme or the /v1 path.
+		if rest := s[i+3:]; c.Params["base_url"] == "" {
+			if q := strings.IndexByte(rest, '?'); q >= 0 {
+				rest = rest[:q]
+			}
+			if lr := strings.ToLower(rest); strings.HasPrefix(lr, "http://") || strings.HasPrefix(lr, "https://") {
+				c.Params["base_url"] = strings.TrimRight(rest, "/")
+				if hu, err := url.Parse(rest); err == nil {
+					c.Host = hu.Host
+				}
+			}
+		}
 		if u.User != nil {
 			if p, ok := u.User.Password(); ok {
 				c.Params["api_key"] = p
@@ -181,7 +196,18 @@ func ParseConn(s string) (*Conn, error) {
 		case c.Host == "":
 			c.Params["base_url"] = base
 		case alias == "ollama" || alias == "vllm" || alias == "lmstudio":
-			c.Params["base_url"] = "http://" + c.Host + "/v1"
+			h := c.Host
+			scheme := "http://"
+			if lh := strings.ToLower(h); strings.HasPrefix(lh, "http://") || strings.HasPrefix(lh, "https://") {
+				scheme = "" // host already carries a scheme
+			}
+			// Append the default /v1 only when the host has no path of its own,
+			// so lmstudio://127.0.0.1:1234/v1 does not become .../v1/v1.
+			bare := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(h), "http://"), "https://")
+			if !strings.Contains(bare, "/") {
+				h += "/v1"
+			}
+			c.Params["base_url"] = scheme + h
 		}
 	}
 	if c.Params["auth"] != "" {

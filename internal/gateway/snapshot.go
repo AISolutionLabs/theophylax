@@ -241,7 +241,13 @@ func (l *Loader) Load(ctx context.Context) error {
 		p := &provs[i]
 		seen[p.ID] = true
 		if c, ok := l.provs[p.ID]; ok && c.updated.Equal(p.UpdatedAt) {
-			c.entry.Row = p
+			// Snapshots are immutable once published: requests still running on
+			// the previous snapshot read this entry, so publish a copy with the
+			// fresh row instead of mutating the shared one. The provider client
+			// itself is reused.
+			ne := *c.entry
+			ne.Row = p
+			c.entry = &ne
 			s.Providers[p.ID] = c.entry
 			continue
 		}

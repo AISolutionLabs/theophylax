@@ -206,46 +206,163 @@ func isSecretEntity(en string) bool { _, ok := secretDetectors[en]; return ok }
 // Restorer swaps placeholders back to original values in model output. It is
 // streaming-safe: text that might be the start of a placeholder is held back
 // until it can be resolved.
+//
+// Restoration is only done where it is safe to send the secret:
+//   - a placeholder inside a URL is restored only if the URL's host is on the
+//     allowlist (the secrets rule's allow_domains; "*" allows any host), so a
+//     response cannot carry a secret to an arbitrary destination in a link;
+//   - when the request was flagged as possibly prompt-injected (tainted),
+//     nothing is restored into tool-call arguments.
+//
+// Anything held back stays as its placeholder and is counted in Withheld.
 type Restorer struct {
-	m       map[string]string
-	pending map[string]string
+	m        map[string]string
+	allow    []string
+	tainted  bool
+	pending  map[string]string
+	seen     map[string]string // recent raw text per stream key, for URL context
+	withheld int
 }
 
-func NewRestorer(m map[string]string) *Restorer {
+// NewRestorer returns nil when there is nothing to restore.
+func NewRestorer(m map[string]string, allow []string, tainted bool) *Restorer {
 	if len(m) == 0 {
 		return nil
 	}
-	return &Restorer{m: m, pending: map[string]string{}}
+	return &Restorer{m: m, allow: allow, tainted: tainted, pending: map[string]string{}, seen: map[string]string{}}
+}
+
+// Withheld is how many placeholders were left in place because restoring them
+// would not have been safe.
+func (r *Restorer) Withheld() int {
+	if r == nil {
+		return 0
+	}
+	return r.withheld
 }
 
 const phPrefix = "[REDACTED:"
 
-func (r *Restorer) replace(s string, jsonEscaped bool) string {
+// urlTerminators end a URL-like token in prose, markdown, shell or JSON text.
+const urlTerminators = " \t\r\n\"'`<>()|\\"
+
+var hostPathRe = regexp.MustCompile(`^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?[/?#]`)
+
+// urlHost reports whether the placeholder at text[i:j] sits inside a URL-like
+// token and, if so, that URL's host ("" when it cannot be determined).
+func urlHost(text string, i, j int) (bool, string) {
+	a := strings.LastIndexAny(text[:i], urlTerminators) + 1
+	b := len(text)
+	if k := strings.IndexAny(text[j:], urlTerminators); k >= 0 {
+		b = j + k
+	}
+	tok := text[a:b]
+	pos := i - a // placeholder offset within tok
+	authStart := -1
+	if k := strings.Index(tok, "://"); k > 0 && k < pos {
+		authStart = k + 3
+	} else if hostPathRe.MatchString(tok) {
+		authStart = 0
+	}
+	if authStart < 0 {
+		return false, ""
+	}
+	authEnd := len(tok)
+	if k := strings.IndexAny(tok[authStart:], "/?#"); k >= 0 {
+		authEnd = authStart + k
+	}
+	auth := tok[authStart:authEnd]
+	if k := strings.LastIndex(auth, "@"); k >= 0 {
+		auth = auth[k+1:]
+	}
+	if strings.Contains(auth, phPrefix) {
+		return true, "" // the host itself is (or contains) a placeholder
+	}
+	host := auth
+	if strings.HasPrefix(host, "[") { // [ipv6]:port
+		if k := strings.Index(host, "]"); k >= 0 {
+			host = host[1:k]
+		}
+	} else if k := strings.LastIndex(host, ":"); k >= 0 {
+		host = host[:k]
+	}
+	return true, strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
+func (r *Restorer) hostAllowed(host string) bool {
+	if host == "" {
+		return false
+	}
+	for _, d := range r.allow {
+		d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
+		if d == "*" || host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
+// restore replaces safe placeholders in s. left is raw text that preceded s in
+// the same stream (for URL context); tool marks tool-call arguments.
+func (r *Restorer) restore(left, s string, jsonEscaped, tool bool) string {
 	if !strings.Contains(s, phPrefix) {
 		return s
 	}
-	for ph, orig := range r.m {
-		if strings.Contains(s, ph) {
+	text := left + s
+	var out strings.Builder
+	last := 0
+	for i := 0; i < len(s); {
+		k := strings.Index(s[i:], phPrefix)
+		if k < 0 {
+			break
+		}
+		at := i + k
+		end := strings.IndexByte(s[at:], ']')
+		if end < 0 {
+			break
+		}
+		ph := s[at : at+end+1]
+		orig, ok := r.m[ph]
+		if !ok {
+			i = at + len(phPrefix)
+			continue
+		}
+		safe := !(tool && r.tainted)
+		if safe {
+			if inURL, host := urlHost(text, len(left)+at, len(left)+at+len(ph)); inURL && !r.hostAllowed(host) {
+				safe = false
+			}
+		}
+		out.WriteString(s[last:at])
+		if safe {
 			v := orig
 			if jsonEscaped {
 				b, _ := json.Marshal(orig)
 				v = string(b[1 : len(b)-1])
 			}
-			s = strings.ReplaceAll(s, ph, v)
+			out.WriteString(v)
+		} else {
+			out.WriteString(ph)
+			r.withheld++
 		}
+		last = at + len(ph)
+		i = last
 	}
-	return s
+	out.WriteString(s[last:])
+	return out.String()
 }
 
-// String restores a complete string.
+// String restores a complete string. jsonEscaped strings are treated as
+// tool-call arguments (JSON text).
 func (r *Restorer) String(s string, jsonEscaped bool) string {
 	if r == nil {
 		return s
 	}
-	return r.replace(s, jsonEscaped)
+	return r.restore("", s, jsonEscaped, jsonEscaped)
 }
 
-// Feed processes a streamed fragment for a given stream key (e.g. a content block).
+// Feed processes a streamed fragment for a given stream key (e.g. a content
+// block). jsonEscaped fragments are tool-call arguments.
 func (r *Restorer) Feed(key, s string, jsonEscaped bool) string {
 	buf := r.pending[key] + s
 	hold := ""
@@ -256,37 +373,55 @@ func (r *Restorer) Feed(key, s string, jsonEscaped bool) string {
 		}
 	}
 	r.pending[key] = hold
-	return r.replace(buf, jsonEscaped)
+	out := r.restore(r.seen[key], buf, jsonEscaped, jsonEscaped)
+	r.remember(key, buf)
+	return out
 }
 
 // Flush releases anything held for key.
 func (r *Restorer) Flush(key string, jsonEscaped bool) string {
 	s := r.pending[key]
 	delete(r.pending, key)
-	return r.replace(s, jsonEscaped)
+	out := r.restore(r.seen[key], s, jsonEscaped, jsonEscaped)
+	delete(r.seen, key)
+	return out
+}
+
+func (r *Restorer) remember(key, s string) {
+	t := r.seen[key] + s
+	if len(t) > 2048 {
+		t = t[len(t)-2048:]
+	}
+	r.seen[key] = t
 }
 
 // Walk restores placeholders in every string of a decoded JSON value.
 // OpenAI tool-call "arguments" are JSON text, so their replacements are escaped.
+// Tool-call arguments and Anthropic tool_use input are restored as tool context.
 func (r *Restorer) Walk(v any) any {
 	if r == nil {
 		return v
 	}
+	return r.walk(v, false)
+}
+
+func (r *Restorer) walk(v any, tool bool) any {
 	switch x := v.(type) {
 	case string:
-		return r.replace(x, false)
+		return r.restore("", x, false, tool)
 	case map[string]any:
+		isTool := tool || x["type"] == "tool_use" || x["type"] == "function_call" || x["type"] == "custom_tool_call"
 		for k, val := range x {
 			if s, ok := val.(string); ok && (k == "arguments" || k == "partial_json") {
-				x[k] = r.replace(s, true)
+				x[k] = r.restore("", s, true, true)
 				continue
 			}
-			x[k] = r.Walk(val)
+			x[k] = r.walk(val, isTool && (k == "input" || tool))
 		}
 		return x
 	case []any:
 		for i := range x {
-			x[i] = r.Walk(x[i])
+			x[i] = r.walk(x[i], tool)
 		}
 		return x
 	}

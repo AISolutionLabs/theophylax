@@ -22,6 +22,13 @@ Each secret is replaced with `[REDACTED:<type>:<8 hex>]`, an HMAC of the value, 
 
 With **restore on return**, placeholders the model emits are replaced by the original values before the response leaves the gateway — in plain responses, streamed text deltas and streamed tool-call JSON (correctly JSON-escaped), with buffering across chunk boundaries. Only values detected in the same request can be restored. Captured payloads are stored *before* restoration, so logs never contain the secrets.
 
+Restoration only puts a secret back where it is safe to send it:
+
+- **Inside a URL, only for allowlisted hosts.** A placeholder that sits in a link or URL (scheme URLs and bare `host/path` forms, including userinfo such as `https://user:TOKEN@host/…`) is restored only if the URL's host is in the rule's `allow_domains` (subdomains included; `"*"` allows any host). Otherwise the placeholder is left in place. If an agent legitimately needs a token in a URL, list the host: `{"type": "secrets", "restore": true, "allow_domains": ["github.com"]}`.
+- **Not into tool calls after injection signals.** When untrusted content in the request scored as a possible prompt injection, nothing is restored into tool-call arguments for that request.
+
+Each placeholder left in place is recorded as a `restore_withheld` finding, so it appears in request logs and in the receipt. These rules narrow, but do not eliminate, the risk of a manipulated model sending a restored secret somewhere unintended; combine Secret Shield with the prompt-injection rule's `exfil_guard` and `tool_guard` for agents that read untrusted content.
+
 ## Prompt injection
 
 The native engine scores each new user message and tool result (or the whole conversation with `scope: all`):

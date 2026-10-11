@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ── Console ────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS ui
+FROM node:25-alpine AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund

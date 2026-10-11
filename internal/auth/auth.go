@@ -166,6 +166,11 @@ func (p *Principal) RoleAt(s Scope) string {
 		}
 	}
 	for _, m := range p.Memberships {
+		// A membership only ever confers a role inside its own organization; a
+		// row whose org_id disagrees with the scope it names is ignored.
+		if s.OrgID != "" && m.OrgID != s.OrgID {
+			continue
+		}
 		switch m.ScopeType {
 		case "org":
 			if m.ScopeID == s.OrgID {

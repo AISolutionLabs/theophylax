@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -472,7 +474,7 @@ func (a *API) listIdPs(c *Ctx) (any, error) {
 	return out, nil
 }
 
-func (a *API) applyIdP(i *store.IdP, in *idpIn) error {
+func (a *API) applyIdP(ctx context.Context, i *store.IdP, in *idpIn) error {
 	if in.Name != nil {
 		i.Name = *in.Name
 	}
@@ -515,6 +517,10 @@ func (a *API) applyIdP(i *store.IdP, in *idpIn) error {
 			if !auth.ValidRole(m.Role) || m.Group == "" {
 				return badReq("each role mapping needs a group and a valid role")
 			}
+			// An IdP belongs to one organization and may only grant roles inside it.
+			if !a.Res.ScopeInOrg(ctx, m.ScopeType, m.ScopeID, i.OrgID) {
+				return badReq(fmt.Sprintf("role mapping for group %q must target an org, team or project in this identity provider's organization", m.Group))
+			}
 		}
 		i.RoleMappings = *in.RoleMappings
 	}
@@ -543,7 +549,7 @@ func (a *API) createIdP(c *Ctx) (any, error) {
 		return nil, err
 	}
 	i := &store.IdP{ID: util.NewID("idp"), OrgID: o.ID, Type: "oidc", Scopes: []string{"openid", "email", "profile"}, GroupsClaim: "groups", EmailDomains: []string{}, JIT: true, DefaultRole: "member", RoleMappings: json.RawMessage("[]"), Enabled: true}
-	if err := a.applyIdP(i, &in); err != nil {
+	if err := a.applyIdP(c, i, &in); err != nil {
 		return nil, err
 	}
 	if _, err := a.Res.OIDC.Discover(c, i.Issuer); err != nil {
@@ -574,7 +580,7 @@ func (a *API) updateIdP(c *Ctx) (any, error) {
 	if err := c.Decode(&in); err != nil {
 		return nil, err
 	}
-	if err := a.applyIdP(i, &in); err != nil {
+	if err := a.applyIdP(c, i, &in); err != nil {
 		return nil, err
 	}
 	if err := a.St.Update(c, a.St.Pool, "idp_providers", i); err != nil {

@@ -17,7 +17,8 @@ Register `https://<public-url>/auth/oidc/callback` as the redirect URI. Login us
 
 - **Allowed email domains** restrict who can sign in.
 - **JIT provisioning** creates accounts on first sign-in; turn it off to require SCIM or invites.
-- **Group mappings** (`groups` or `roles` claim) grant roles at org, team or project level and are re-applied at every sign-in; mapping-managed memberships are removed when the group disappears. Manually added memberships are never touched.
+- **Group mappings** (`groups` or `roles` claim) grant roles at org, team or project level and are re-applied at every sign-in; mapping-managed memberships are removed when the group disappears. Manually added memberships are never touched. Mappings may only target the identity provider's own organization and its teams and projects.
+- **Account linking.** An identity provider belongs to one organization and is trusted only inside it. A sign-in matches the user already bound to the provider by its subject (`sub`), so a changed email keeps the same account. Otherwise an existing account with the same email is linked automatically only if it is not a platform admin and has no memberships in other organizations; anything else is refused. To let such an account sign in through a provider, a platform admin binds it explicitly with `PATCH /api/users/{id}` `{"idp_id": "idp_…"}` (`""` unbinds). Tokens with `email_verified: false` are refused.
 
 ### SSO tokens as gateway credentials
 
@@ -27,7 +28,7 @@ With *Accept access tokens* on, a valid IdP JWT (audience = client ID or a confi
 
 Generate a SCIM token on the identity provider and point Entra ID / Okta provisioning at `https://<public-url>/scim/v2`.
 
-- `Users`: create, get, list with `filter=userName eq "…"` / `externalId eq "…"`, replace, patch (`active`, names, emails), delete. Deactivating removes all memberships in the org and revokes the person's keys.
+- `Users`: create, get, list with `filter=userName eq "…"` / `externalId eq "…"`, replace, patch (`active`, names, emails), delete. Deactivating removes all memberships in the org and revokes the person's keys. The same linking rule applies: creating a user whose email belongs to an account managed outside the organization returns `409`, and for people who also belong to other organizations SCIM manages their membership here (`active`) but not their name, email or externalId.
 - `Groups` ↔ teams: create (or link by name / externalId), patch members, replace, delete (unlinks; projects and keys stay).
 
 ## Personal access tokens

@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"theophylax/internal/util"
 )
 
 // OIDC provides discovery, JWKS caching and JWT verification for any
@@ -46,8 +48,12 @@ type jwks struct {
 	fetched time.Time
 }
 
+// SetHTTPClient overrides the outbound client used for discovery, JWKS and
+// token exchange. Used to relax the SSRF guard's loopback rule in dev mode.
+func (o *OIDC) SetHTTPClient(c *http.Client) { o.client = c }
+
 func NewOIDC() *OIDC {
-	return &OIDC{client: &http.Client{Timeout: 10 * time.Second}, disc: map[string]*discovery{}, keys: map[string]*jwks{}}
+	return &OIDC{client: util.SafeHTTPClient(10*time.Second, false), disc: map[string]*discovery{}, keys: map[string]*jwks{}}
 }
 
 func (o *OIDC) Discover(ctx context.Context, issuer string) (*discovery, error) {

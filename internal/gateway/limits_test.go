@@ -79,3 +79,27 @@ func TestRateLimiterGlobal(t *testing.T) {
 		t.Fatalf("database has %d, replicas admitted %d", reqs, total)
 	}
 }
+
+// TestAllowAllAtomic verifies that when a later scope's limit rejects a
+// request, the earlier scopes are not charged for it.
+func TestAllowAllAtomic(t *testing.T) {
+	rl := NewRateLimiter()
+	// org is exhausted; key and project have plenty of headroom.
+	lim := []Limit{{Key: "key:k", RPM: 100}, {Key: "project:p", RPM: 100}, {Key: "org:o", RPM: 1}}
+	if ok, _, _, _ := rl.AllowAll(lim); !ok {
+		t.Fatal("first request should be allowed")
+	}
+	// org now at its limit of 1 -> next request rejected, attributed to org.
+	ok, _, why, key := rl.AllowAll(lim)
+	if ok || key != "org:o" || why != "requests per minute" {
+		t.Fatalf("expected org rejection, got ok=%v why=%q key=%q", ok, why, key)
+	}
+	// The rejected request must not have been counted against key or project:
+	// each should still have 1 (from the single allowed request), so 99 more
+	// requests against them alone must all pass.
+	for i := 0; i < 99; i++ {
+		if ok, _, _, _ := rl.AllowAll([]Limit{{Key: "key:k", RPM: 100}, {Key: "project:p", RPM: 100}}); !ok {
+			t.Fatalf("key/project over-counted: rejected at i=%d", i)
+		}
+	}
+}

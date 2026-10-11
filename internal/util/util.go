@@ -2,6 +2,7 @@
 package util
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -151,3 +152,81 @@ func MatchModel(pattern, model string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// SSRF guard for admin-configured outbound URLs (guardrail webhooks, OIDC
+// issuer discovery/JWKS, external guardrail vendors). It blocks connections to
+// loopback and link-local addresses — in particular the cloud metadata
+// endpoints (169.254.169.254 and friends), the usual SSRF→credential-theft
+// target. The check runs in DialContext against the address the resolver
+// actually returns, so hostnames that resolve to a blocked IP and DNS-rebinding
+// are caught too. Private LAN ranges are intentionally still reachable: internal
+// identity providers and self-hosted guardrail services are legitimate.
+//
+// Note: provider upstreams and instance-metadata credential fetches use their
+// own, deliberately unguarded clients and must not go through this.
+
+// BlockedDialIP reports whether dialing ip should be refused by the SSRF guard.
+// Link-local (incl. the 169.254.169.254 cloud-metadata endpoint), unspecified
+// and 0.0.0.0/8 addresses are always refused. Loopback is refused unless
+// allowLoopback is set, which dev mode does so a localhost IdP or guardrail
+// service can be used while developing.
+func BlockedDialIP(ip net.IP, allowLoopback bool) bool {
+	if ip == nil {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 0 { // 0.0.0.0/8 "this host"
+			return true
+		}
+	}
+	if ip.IsLoopback() {
+		return !allowLoopback
+	}
+	return ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// SafeHTTPClient returns an http.Client whose transport refuses connections the
+// SSRF guard blocks (see BlockedDialIP). Use it for any fetch whose target URL
+// is supplied by an org admin rather than by Theophylax. allowLoopback relaxes
+// the loopback rule for dev mode; link-local is blocked regardless.
+func SafeHTTPClient(timeout time.Duration, allowLoopback bool) *http.Client {
+	d := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ipa := range ips {
+				if BlockedDialIP(ipa.IP, allowLoopback) {
+					lastErr = &net.OpError{Op: "dial", Net: network, Err: errBlockedAddr}
+					continue
+				}
+				conn, err := d.DialContext(ctx, network, net.JoinHostPort(ipa.IP.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr == nil {
+				lastErr = &net.OpError{Op: "dial", Net: network, Err: errBlockedAddr}
+			}
+			return nil, lastErr
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+	return &http.Client{Timeout: timeout, Transport: tr}
+}
+
+var errBlockedAddr = errors.New("address blocked by SSRF guard (loopback or link-local)")

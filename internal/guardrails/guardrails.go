@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"theophylax/internal/util"
 )
 
 type Rule struct {
@@ -96,8 +98,12 @@ type Engine struct {
 
 // New creates an engine. hmacKey keys the stable redaction placeholders.
 func New(hmacKey []byte, bedrock func(string) BedrockApplier) *Engine {
-	return &Engine{client: &http.Client{Timeout: 10 * time.Second}, bedrock: bedrock, hmacKey: hmacKey}
+	return &Engine{client: util.SafeHTTPClient(10*time.Second, false), bedrock: bedrock, hmacKey: hmacKey}
 }
+
+// SetHTTPClient overrides the outbound client used for webhook and external
+// vendor guardrails. Used to relax the SSRF guard's loopback rule in dev mode.
+func (e *Engine) SetHTTPClient(c *http.Client) { e.client = c }
 
 // ---------------------------------------------------------------------------
 // Detectors

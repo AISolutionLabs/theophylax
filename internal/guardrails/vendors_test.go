@@ -41,6 +41,7 @@ func TestVendorGuardrails(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := New([]byte("k"), nil)
+	e.client = srv.Client() // vendor endpoints are external in prod (SSRF-guarded); the test mock is on loopback
 	run := func(r Rule, text string, toolText string) Result {
 		b := body(text)
 		if toolText != "" {

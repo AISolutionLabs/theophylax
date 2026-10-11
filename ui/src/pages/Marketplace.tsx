@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Bot, Download, FileCode2, Puzzle, Server, Star, Store, Wand2 } from 'lucide-react'
@@ -9,7 +9,7 @@ import { fmtAgo, fmtCompact, kindLabel } from '../lib/format'
 import { Markdown } from '../components/Markdown'
 import { Badge, Button, CodeBlock, Drawer, Empty, ErrorNote, Field, Input, Loading, PageHead, Segmented, Select, Tabs, useAction } from '../components/ui'
 
-export const kindIcon = (k: string, size = 16) => ({ skill: <Wand2 size={size} />, mcp_server: <Server size={size} />, agent: <Bot size={size} />, prompt: <FileCode2 size={size} />, plugin: <Puzzle size={size} /> } as Record<string, JSX.Element>)[k] ?? <Puzzle size={size} />
+export const kindIcon = (k: string, size = 16) => ({ skill: <Wand2 size={size} />, mcp_server: <Server size={size} />, agent: <Bot size={size} />, prompt: <FileCode2 size={size} />, plugin: <Puzzle size={size} /> } as Record<string, ReactNode>)[k] ?? <Puzzle size={size} />
 
 export default function Marketplace() {
   const { org } = useApp()

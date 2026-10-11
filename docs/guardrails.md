@@ -69,6 +69,8 @@ Detection is measured on a labelled corpus (`internal/guardrails/testdata/inject
 | dev (tuned on) | 100% (66/66) | 0% (0/32) |
 | **test (held out)** | **91% (64/70)** | **0% (0/28)** |
 
+Read these numbers for what they are. The corpus is 196 examples produced by one template generator, and the held-out split is a seeded shuffle of the same pool, so it is not independent of the data the detector was tuned on and says little about novel attacks. With 28 benign samples, observing no false positives still leaves a 95% upper bound of about 11% on the false-positive rate. The value of the corpus is that it is reproducible and enforced in CI as a regression floor; independent evaluation sets and reported bypasses are very welcome (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
+
 On 308 real third-party READMEs and package descriptions scanned as untrusted tool output, 2.3% were flagged, and every hit was a document containing prompt templates or jailbreak examples. CI fails if either split drops below 88% recall or rises above 4% false positives. Treat the native engine as a strong first layer: pair it with `tool_guard`, `canary`, a judge or a hosted classifier for high-risk agents.
 
 ## Webhook contract

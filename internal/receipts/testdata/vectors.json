@@ -1,0 +1,221 @@
+{
+  "comment": "Theophylax receipt test vectors (draft v0). See docs/receipt-spec.md. The signing seed is published for testing only.",
+  "signing_seed_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+  "jwks": {
+    "keys": [
+      {
+        "alg": "EdDSA",
+        "crv": "Ed25519",
+        "kid": "tpx-b600306cfa76",
+        "kty": "OKP",
+        "use": "sig",
+        "x": "GX9rI-FshTLGq8g4-s1ep4m-DHaykgM0A5v6iz02jWE"
+      }
+    ]
+  },
+  "kid": "tpx-b600306cfa76",
+  "valid": [
+    {
+      "name": "non_streaming",
+      "request_body": "{\"model\":\"example-model\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+      "response_body": "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}",
+      "req_sha256": "7939cd1475b221f339007bfb41954abc90da4438c2e238f0e5c264970d574918",
+      "resp_sha256": "4448e20b723ae3a417e146314b0590b9531bfaa753d7391effe89533f5db9479",
+      "receipt": {
+        "v": 1,
+        "rid": "req_vector_non_streaming",
+        "iss": "https://gateway.example",
+        "iat": 1791000000,
+        "org": "org_example",
+        "project": "prj_example",
+        "sub": {
+          "type": "key",
+          "id": "key_example"
+        },
+        "endpoint": "/v1/messages",
+        "model_requested": "example-model",
+        "route": {
+          "model": "example-model",
+          "provider_id": "prv_example",
+          "provider_kind": "anthropic",
+          "upstream_model": "example-upstream",
+          "attempts": 1
+        },
+        "req_sha256": "7939cd1475b221f339007bfb41954abc90da4438c2e238f0e5c264970d574918",
+        "resp_sha256": "4448e20b723ae3a417e146314b0590b9531bfaa753d7391effe89533f5db9479",
+        "stream": false,
+        "status": 200,
+        "policies": [
+          {
+            "id": "grd_example",
+            "name": "Secret Shield",
+            "scope": "org",
+            "mode": "enforce",
+            "digest": "sha256:6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0"
+          }
+        ],
+        "actions": [
+          {
+            "policy": "Secret Shield",
+            "rule": "secrets",
+            "action": "redact",
+            "phase": "input",
+            "count": 1
+          }
+        ],
+        "usage": {
+          "input": 12,
+          "output": 5,
+          "cache_read": 0,
+          "cache_write": 0
+        },
+        "cost_usd": 0.0001
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRweC1iNjAwMzA2Y2ZhNzYiLCJ0eXAiOiJ0cHgtcmVjZWlwdCtqd3QifQ.eyJ2IjoxLCJyaWQiOiJyZXFfdmVjdG9yX25vbl9zdHJlYW1pbmciLCJpc3MiOiJodHRwczovL2dhdGV3YXkuZXhhbXBsZSIsImlhdCI6MTc5MTAwMDAwMCwib3JnIjoib3JnX2V4YW1wbGUiLCJwcm9qZWN0IjoicHJqX2V4YW1wbGUiLCJzdWIiOnsidHlwZSI6ImtleSIsImlkIjoia2V5X2V4YW1wbGUifSwiZW5kcG9pbnQiOiIvdjEvbWVzc2FnZXMiLCJtb2RlbF9yZXF1ZXN0ZWQiOiJleGFtcGxlLW1vZGVsIiwicm91dGUiOnsibW9kZWwiOiJleGFtcGxlLW1vZGVsIiwicHJvdmlkZXJfaWQiOiJwcnZfZXhhbXBsZSIsInByb3ZpZGVyX2tpbmQiOiJhbnRocm9waWMiLCJ1cHN0cmVhbV9tb2RlbCI6ImV4YW1wbGUtdXBzdHJlYW0iLCJhdHRlbXB0cyI6MX0sInJlcV9zaGEyNTYiOiI3OTM5Y2QxNDc1YjIyMWYzMzkwMDdiZmI0MTk1NGFiYzkwZGE0NDM4YzJlMjM4ZjBlNWMyNjQ5NzBkNTc0OTE4IiwicmVzcF9zaGEyNTYiOiI0NDQ4ZTIwYjcyM2FlM2E0MTdlMTQ2MzE0YjA1OTBiOTUzMWJmYWE3NTNkNzM5MWVmZmU4OTUzM2Y1ZGI5NDc5Iiwic3RyZWFtIjpmYWxzZSwic3RhdHVzIjoyMDAsInBvbGljaWVzIjpbeyJpZCI6ImdyZF9leGFtcGxlIiwibmFtZSI6IlNlY3JldCBTaGllbGQiLCJzY29wZSI6Im9yZyIsIm1vZGUiOiJlbmZvcmNlIiwiZGlnZXN0Ijoic2hhMjU2OjZjNjIxZDFhMDUxMzhhNzg4OGQzN2Q5MjY5YTlkYThlMmUxMWU0YWNlZDJmNmNmZDI0YjA1YWIxYjllNjFiYjAifV0sImFjdGlvbnMiOlt7InBvbGljeSI6IlNlY3JldCBTaGllbGQiLCJydWxlIjoic2VjcmV0cyIsImFjdGlvbiI6InJlZGFjdCIsInBoYXNlIjoiaW5wdXQiLCJjb3VudCI6MX1dLCJ1c2FnZSI6eyJpbnB1dCI6MTIsIm91dHB1dCI6NSwiY2FjaGVfcmVhZCI6MCwiY2FjaGVfd3JpdGUiOjB9LCJjb3N0X3VzZCI6MC4wMDAxfQ.X2gtcHdT7dXKpXgbW3v76vqzDN7cBKMTuRQlCsd3EDeQpEfMChlvDSTonENQXZ4_i1c3ITxQynQ6vjNRFyL2Dg",
+      "leaf_sha256": "466a0e72c2f4829fd8172e4a28eed3fbf1050d800fcabe2c36d0fa0a0dca1005"
+    },
+    {
+      "name": "streaming",
+      "request_body": "{\"model\":\"example-model\",\"max_tokens\":16,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+      "response_body": "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "req_sha256": "1853129ed7a8b0249ee7c69136b75a66692d20dca46dbae791a08fa8c496a308",
+      "resp_sha256": "40c8bc5c6b3f9bbddd215a3f2d680ed5e7d38fb9884e126aa0adfcf43a0ebca7",
+      "receipt": {
+        "v": 1,
+        "rid": "req_vector_streaming",
+        "iss": "https://gateway.example",
+        "iat": 1791000000,
+        "org": "org_example",
+        "project": "prj_example",
+        "sub": {
+          "type": "key",
+          "id": "key_example"
+        },
+        "endpoint": "/v1/messages",
+        "model_requested": "example-model",
+        "route": {
+          "model": "example-model",
+          "provider_id": "prv_example",
+          "provider_kind": "anthropic",
+          "upstream_model": "example-upstream",
+          "attempts": 1
+        },
+        "req_sha256": "1853129ed7a8b0249ee7c69136b75a66692d20dca46dbae791a08fa8c496a308",
+        "resp_sha256": "40c8bc5c6b3f9bbddd215a3f2d680ed5e7d38fb9884e126aa0adfcf43a0ebca7",
+        "stream": true,
+        "status": 200,
+        "policies": [
+          {
+            "id": "grd_example",
+            "name": "Secret Shield",
+            "scope": "org",
+            "mode": "enforce",
+            "digest": "sha256:6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0"
+          }
+        ],
+        "actions": [
+          {
+            "policy": "Secret Shield",
+            "rule": "secrets",
+            "action": "redact",
+            "phase": "input",
+            "count": 1
+          }
+        ],
+        "usage": {
+          "input": 12,
+          "output": 5,
+          "cache_read": 0,
+          "cache_write": 0
+        },
+        "cost_usd": 0.0001
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRweC1iNjAwMzA2Y2ZhNzYiLCJ0eXAiOiJ0cHgtcmVjZWlwdCtqd3QifQ.eyJ2IjoxLCJyaWQiOiJyZXFfdmVjdG9yX3N0cmVhbWluZyIsImlzcyI6Imh0dHBzOi8vZ2F0ZXdheS5leGFtcGxlIiwiaWF0IjoxNzkxMDAwMDAwLCJvcmciOiJvcmdfZXhhbXBsZSIsInByb2plY3QiOiJwcmpfZXhhbXBsZSIsInN1YiI6eyJ0eXBlIjoia2V5IiwiaWQiOiJrZXlfZXhhbXBsZSJ9LCJlbmRwb2ludCI6Ii92MS9tZXNzYWdlcyIsIm1vZGVsX3JlcXVlc3RlZCI6ImV4YW1wbGUtbW9kZWwiLCJyb3V0ZSI6eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwiLCJwcm92aWRlcl9pZCI6InBydl9leGFtcGxlIiwicHJvdmlkZXJfa2luZCI6ImFudGhyb3BpYyIsInVwc3RyZWFtX21vZGVsIjoiZXhhbXBsZS11cHN0cmVhbSIsImF0dGVtcHRzIjoxfSwicmVxX3NoYTI1NiI6IjE4NTMxMjllZDdhOGIwMjQ5ZWU3YzY5MTM2Yjc1YTY2NjkyZDIwZGNhNDZkYmFlNzkxYTA4ZmE4YzQ5NmEzMDgiLCJyZXNwX3NoYTI1NiI6IjQwYzhiYzVjNmIzZjliYmRkZDIxNWEzZjJkNjgwZWQ1ZTdkMzhmYjk4ODRlMTI2YWEwYWRmY2Y0M2EwZWJjYTciLCJzdHJlYW0iOnRydWUsInN0YXR1cyI6MjAwLCJwb2xpY2llcyI6W3siaWQiOiJncmRfZXhhbXBsZSIsIm5hbWUiOiJTZWNyZXQgU2hpZWxkIiwic2NvcGUiOiJvcmciLCJtb2RlIjoiZW5mb3JjZSIsImRpZ2VzdCI6InNoYTI1Njo2YzYyMWQxYTA1MTM4YTc4ODhkMzdkOTI2OWE5ZGE4ZTJlMTFlNGFjZWQyZjZjZmQyNGIwNWFiMWI5ZTYxYmIwIn1dLCJhY3Rpb25zIjpbeyJwb2xpY3kiOiJTZWNyZXQgU2hpZWxkIiwicnVsZSI6InNlY3JldHMiLCJhY3Rpb24iOiJyZWRhY3QiLCJwaGFzZSI6ImlucHV0IiwiY291bnQiOjF9XSwidXNhZ2UiOnsiaW5wdXQiOjEyLCJvdXRwdXQiOjUsImNhY2hlX3JlYWQiOjAsImNhY2hlX3dyaXRlIjowfSwiY29zdF91c2QiOjAuMDAwMX0.P42vTVGGgkjFOktilYfkoF1X8Q3ErXAuZLhz7i2CKbn6fstigNvfKSA_BaKkS4LnF_RnY72JYVFUe2r-eMDABw",
+      "leaf_sha256": "7a607b32a701614c2e903d269b0d323e1b62962d5c94cbaf844bdcb2908ce204"
+    },
+    {
+      "name": "upstream_error",
+      "request_body": "{\"model\":\"example-model\",\"max_tokens\":16,\"messages\":[]}",
+      "response_body": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages: at least one message is required\"}}",
+      "req_sha256": "d220b15be57e7c928d87fa43d82c2c391cad66bd9354ffaa4b33b99b6ada8c18",
+      "resp_sha256": "bc56cbce891eb067a328d7b6ee201ef5352cbfbe6cee9a09b04ffa23ca01b2eb",
+      "receipt": {
+        "v": 1,
+        "rid": "req_vector_upstream_error",
+        "iss": "https://gateway.example",
+        "iat": 1791000000,
+        "org": "org_example",
+        "project": "prj_example",
+        "sub": {
+          "type": "key",
+          "id": "key_example"
+        },
+        "endpoint": "/v1/messages",
+        "model_requested": "example-model",
+        "route": {
+          "model": "example-model",
+          "provider_id": "prv_example",
+          "provider_kind": "anthropic",
+          "upstream_model": "example-upstream",
+          "attempts": 1
+        },
+        "req_sha256": "d220b15be57e7c928d87fa43d82c2c391cad66bd9354ffaa4b33b99b6ada8c18",
+        "resp_sha256": "bc56cbce891eb067a328d7b6ee201ef5352cbfbe6cee9a09b04ffa23ca01b2eb",
+        "stream": false,
+        "status": 400,
+        "policies": [
+          {
+            "id": "grd_example",
+            "name": "Secret Shield",
+            "scope": "org",
+            "mode": "enforce",
+            "digest": "sha256:6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0"
+          }
+        ],
+        "actions": [
+          {
+            "policy": "Secret Shield",
+            "rule": "secrets",
+            "action": "redact",
+            "phase": "input",
+            "count": 1
+          }
+        ],
+        "usage": {
+          "input": 12,
+          "output": 5,
+          "cache_read": 0,
+          "cache_write": 0
+        },
+        "cost_usd": 0.0001
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRweC1iNjAwMzA2Y2ZhNzYiLCJ0eXAiOiJ0cHgtcmVjZWlwdCtqd3QifQ.eyJ2IjoxLCJyaWQiOiJyZXFfdmVjdG9yX3Vwc3RyZWFtX2Vycm9yIiwiaXNzIjoiaHR0cHM6Ly9nYXRld2F5LmV4YW1wbGUiLCJpYXQiOjE3OTEwMDAwMDAsIm9yZyI6Im9yZ19leGFtcGxlIiwicHJvamVjdCI6InByal9leGFtcGxlIiwic3ViIjp7InR5cGUiOiJrZXkiLCJpZCI6ImtleV9leGFtcGxlIn0sImVuZHBvaW50IjoiL3YxL21lc3NhZ2VzIiwibW9kZWxfcmVxdWVzdGVkIjoiZXhhbXBsZS1tb2RlbCIsInJvdXRlIjp7Im1vZGVsIjoiZXhhbXBsZS1tb2RlbCIsInByb3ZpZGVyX2lkIjoicHJ2X2V4YW1wbGUiLCJwcm92aWRlcl9raW5kIjoiYW50aHJvcGljIiwidXBzdHJlYW1fbW9kZWwiOiJleGFtcGxlLXVwc3RyZWFtIiwiYXR0ZW1wdHMiOjF9LCJyZXFfc2hhMjU2IjoiZDIyMGIxNWJlNTdlN2M5MjhkODdmYTQzZDgyYzJjMzkxY2FkNjZiZDkzNTRmZmFhNGIzM2I5OWI2YWRhOGMxOCIsInJlc3Bfc2hhMjU2IjoiYmM1NmNiY2U4OTFlYjA2N2EzMjhkN2I2ZWUyMDFlZjUzNTJjYmZiZTZjZWU5YTA5YjA0ZmZhMjNjYTAxYjJlYiIsInN0cmVhbSI6ZmFsc2UsInN0YXR1cyI6NDAwLCJwb2xpY2llcyI6W3siaWQiOiJncmRfZXhhbXBsZSIsIm5hbWUiOiJTZWNyZXQgU2hpZWxkIiwic2NvcGUiOiJvcmciLCJtb2RlIjoiZW5mb3JjZSIsImRpZ2VzdCI6InNoYTI1Njo2YzYyMWQxYTA1MTM4YTc4ODhkMzdkOTI2OWE5ZGE4ZTJlMTFlNGFjZWQyZjZjZmQyNGIwNWFiMWI5ZTYxYmIwIn1dLCJhY3Rpb25zIjpbeyJwb2xpY3kiOiJTZWNyZXQgU2hpZWxkIiwicnVsZSI6InNlY3JldHMiLCJhY3Rpb24iOiJyZWRhY3QiLCJwaGFzZSI6ImlucHV0IiwiY291bnQiOjF9XSwidXNhZ2UiOnsiaW5wdXQiOjEyLCJvdXRwdXQiOjUsImNhY2hlX3JlYWQiOjAsImNhY2hlX3dyaXRlIjowfSwiY29zdF91c2QiOjAuMDAwMX0.CQVq5z3H7QdFUP2yub_4aAU70AE9l9e-gRfNQefT4ku0TUJQYmWr7h-wowuKp85t-sC7XI7iNdYyx663pW-SAg",
+      "leaf_sha256": "b3427cf01b61131e32a3042be9dc3d1316ad1bff28241026098cbdb9bc80f09b"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "payload_modified",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRweC1iNjAwMzA2Y2ZhNzYiLCJ0eXAiOiJ0cHgtcmVjZWlwdCtqd3QifQ.eyJ2IjoxLCAyaWQiOiJyZXFfdmVjdG9yX25vbl9zdHJlYW1pbmciLCJpc3MiOiJodHRwczovL2dhdGV3YXkuZXhhbXBsZSIsImlhdCI6MTc5MTAwMDAwMCwib3JnIjoib3JnX2V4YW1wbGUiLCJwcm9qZWN0IjoicHJqX2V4YW1wbGUiLCJzdWIiOnsidHlwZSI6ImtleSIsImlkIjoia2V5X2V4YW1wbGUifSwiZW5kcG9pbnQiOiIvdjEvbWVzc2FnZXMiLCJtb2RlbF9yZXF1ZXN0ZWQiOiJleGFtcGxlLW1vZGVsIiwicm91dGUiOnsibW9kZWwiOiJleGFtcGxlLW1vZGVsIiwicHJvdmlkZXJfaWQiOiJwcnZfZXhhbXBsZSIsInByb3ZpZGVyX2tpbmQiOiJhbnRocm9waWMiLCJ1cHN0cmVhbV9tb2RlbCI6ImV4YW1wbGUtdXBzdHJlYW0iLCJhdHRlbXB0cyI6MX0sInJlcV9zaGEyNTYiOiI3OTM5Y2QxNDc1YjIyMWYzMzkwMDdiZmI0MTk1NGFiYzkwZGE0NDM4YzJlMjM4ZjBlNWMyNjQ5NzBkNTc0OTE4IiwicmVzcF9zaGEyNTYiOiI0NDQ4ZTIwYjcyM2FlM2E0MTdlMTQ2MzE0YjA1OTBiOTUzMWJmYWE3NTNkNzM5MWVmZmU4OTUzM2Y1ZGI5NDc5Iiwic3RyZWFtIjpmYWxzZSwic3RhdHVzIjoyMDAsInBvbGljaWVzIjpbeyJpZCI6ImdyZF9leGFtcGxlIiwibmFtZSI6IlNlY3JldCBTaGllbGQiLCJzY29wZSI6Im9yZyIsIm1vZGUiOiJlbmZvcmNlIiwiZGlnZXN0Ijoic2hhMjU2OjZjNjIxZDFhMDUxMzhhNzg4OGQzN2Q5MjY5YTlkYThlMmUxMWU0YWNlZDJmNmNmZDI0YjA1YWIxYjllNjFiYjAifV0sImFjdGlvbnMiOlt7InBvbGljeSI6IlNlY3JldCBTaGllbGQiLCJydWxlIjoic2VjcmV0cyIsImFjdGlvbiI6InJlZGFjdCIsInBoYXNlIjoiaW5wdXQiLCJjb3VudCI6MX1dLCJ1c2FnZSI6eyJpbnB1dCI6MTIsIm91dHB1dCI6NSwiY2FjaGVfcmVhZCI6MCwiY2FjaGVfd3JpdGUiOjB9LCJjb3N0X3VzZCI6MC4wMDAxfQ.X2gtcHdT7dXKpXgbW3v76vqzDN7cBKMTuRQlCsd3EDeQpEfMChlvDSTonENQXZ4_i1c3ITxQynQ6vjNRFyL2Dg",
+      "reason": "signature does not cover the modified payload"
+    },
+    {
+      "name": "unknown_key",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InRweC1mZTgxMmMxMmYzYWIiLCJ0eXAiOiJ0cHgtcmVjZWlwdCtqd3QifQ.eyJ2IjoxLCJyaWQiOiJyZXFfdmVjdG9yX25vbl9zdHJlYW1pbmciLCJpc3MiOiJodHRwczovL2dhdGV3YXkuZXhhbXBsZSIsImlhdCI6MTc5MTAwMDAwMCwib3JnIjoib3JnX2V4YW1wbGUiLCJwcm9qZWN0IjoicHJqX2V4YW1wbGUiLCJzdWIiOnsidHlwZSI6ImtleSIsImlkIjoia2V5X2V4YW1wbGUifSwiZW5kcG9pbnQiOiIvdjEvbWVzc2FnZXMiLCJtb2RlbF9yZXF1ZXN0ZWQiOiJleGFtcGxlLW1vZGVsIiwicm91dGUiOnsibW9kZWwiOiJleGFtcGxlLW1vZGVsIiwicHJvdmlkZXJfaWQiOiJwcnZfZXhhbXBsZSIsInByb3ZpZGVyX2tpbmQiOiJhbnRocm9waWMiLCJ1cHN0cmVhbV9tb2RlbCI6ImV4YW1wbGUtdXBzdHJlYW0iLCJhdHRlbXB0cyI6MX0sInJlcV9zaGEyNTYiOiI3OTM5Y2QxNDc1YjIyMWYzMzkwMDdiZmI0MTk1NGFiYzkwZGE0NDM4YzJlMjM4ZjBlNWMyNjQ5NzBkNTc0OTE4IiwicmVzcF9zaGEyNTYiOiI0NDQ4ZTIwYjcyM2FlM2E0MTdlMTQ2MzE0YjA1OTBiOTUzMWJmYWE3NTNkNzM5MWVmZmU4OTUzM2Y1ZGI5NDc5Iiwic3RyZWFtIjpmYWxzZSwic3RhdHVzIjoyMDAsInBvbGljaWVzIjpbeyJpZCI6ImdyZF9leGFtcGxlIiwibmFtZSI6IlNlY3JldCBTaGllbGQiLCJzY29wZSI6Im9yZyIsIm1vZGUiOiJlbmZvcmNlIiwiZGlnZXN0Ijoic2hhMjU2OjZjNjIxZDFhMDUxMzhhNzg4OGQzN2Q5MjY5YTlkYThlMmUxMWU0YWNlZDJmNmNmZDI0YjA1YWIxYjllNjFiYjAifV0sImFjdGlvbnMiOlt7InBvbGljeSI6IlNlY3JldCBTaGllbGQiLCJydWxlIjoic2VjcmV0cyIsImFjdGlvbiI6InJlZGFjdCIsInBoYXNlIjoiaW5wdXQiLCJjb3VudCI6MX1dLCJ1c2FnZSI6eyJpbnB1dCI6MTIsIm91dHB1dCI6NSwiY2FjaGVfcmVhZCI6MCwiY2FjaGVfd3JpdGUiOjB9LCJjb3N0X3VzZCI6MC4wMDAxfQ.syOwbdK-kFe__3e5SYoheXAyDUyeSYq9xlJBzv6Jk5JTmtz86jeysiNVFyJenq8DWchQXduRRC35Mkrk4p1nAA",
+      "reason": "signed by a key whose kid is not in the JWKS"
+    },
+    {
+      "name": "alg_none",
+      "jws": "eyJhbGciOiJub25lIiwia2lkIjoidHB4LWI2MDAzMDZjZmE3NiIsInR5cCI6InRweC1yZWNlaXB0K2p3dCJ9.eyJ2IjoxLCJyaWQiOiJyZXFfdmVjdG9yX25vbl9zdHJlYW1pbmciLCJpc3MiOiJodHRwczovL2dhdGV3YXkuZXhhbXBsZSIsImlhdCI6MTc5MTAwMDAwMCwib3JnIjoib3JnX2V4YW1wbGUiLCJwcm9qZWN0IjoicHJqX2V4YW1wbGUiLCJzdWIiOnsidHlwZSI6ImtleSIsImlkIjoia2V5X2V4YW1wbGUifSwiZW5kcG9pbnQiOiIvdjEvbWVzc2FnZXMiLCJtb2RlbF9yZXF1ZXN0ZWQiOiJleGFtcGxlLW1vZGVsIiwicm91dGUiOnsibW9kZWwiOiJleGFtcGxlLW1vZGVsIiwicHJvdmlkZXJfaWQiOiJwcnZfZXhhbXBsZSIsInByb3ZpZGVyX2tpbmQiOiJhbnRocm9waWMiLCJ1cHN0cmVhbV9tb2RlbCI6ImV4YW1wbGUtdXBzdHJlYW0iLCJhdHRlbXB0cyI6MX0sInJlcV9zaGEyNTYiOiI3OTM5Y2QxNDc1YjIyMWYzMzkwMDdiZmI0MTk1NGFiYzkwZGE0NDM4YzJlMjM4ZjBlNWMyNjQ5NzBkNTc0OTE4IiwicmVzcF9zaGEyNTYiOiI0NDQ4ZTIwYjcyM2FlM2E0MTdlMTQ2MzE0YjA1OTBiOTUzMWJmYWE3NTNkNzM5MWVmZmU4OTUzM2Y1ZGI5NDc5Iiwic3RyZWFtIjpmYWxzZSwic3RhdHVzIjoyMDAsInBvbGljaWVzIjpbeyJpZCI6ImdyZF9leGFtcGxlIiwibmFtZSI6IlNlY3JldCBTaGllbGQiLCJzY29wZSI6Im9yZyIsIm1vZGUiOiJlbmZvcmNlIiwiZGlnZXN0Ijoic2hhMjU2OjZjNjIxZDFhMDUxMzhhNzg4OGQzN2Q5MjY5YTlkYThlMmUxMWU0YWNlZDJmNmNmZDI0YjA1YWIxYjllNjFiYjAifV0sImFjdGlvbnMiOlt7InBvbGljeSI6IlNlY3JldCBTaGllbGQiLCJydWxlIjoic2VjcmV0cyIsImFjdGlvbiI6InJlZGFjdCIsInBoYXNlIjoiaW5wdXQiLCJjb3VudCI6MX1dLCJ1c2FnZSI6eyJpbnB1dCI6MTIsIm91dHB1dCI6NSwiY2FjaGVfcmVhZCI6MCwiY2FjaGVfd3JpdGUiOjB9LCJjb3N0X3VzZCI6MC4wMDAxfQ.",
+      "reason": "only alg EdDSA is accepted"
+    }
+  ],
+  "merkle": {
+    "leaf_sha256": [
+      "466a0e72c2f4829fd8172e4a28eed3fbf1050d800fcabe2c36d0fa0a0dca1005",
+      "7a607b32a701614c2e903d269b0d323e1b62962d5c94cbaf844bdcb2908ce204",
+      "b3427cf01b61131e32a3042be9dc3d1316ad1bff28241026098cbdb9bc80f09b"
+    ],
+    "root": "182312698c3f943a255a61051a207045b131b3cde1f0f9f3b667ca556e6658fe"
+  }
+}

@@ -1,6 +1,8 @@
 # Proof-of-Inference receipts
 
-Request logs answer "what happened?" only if you trust whoever runs the database. Receipts make the answer checkable.
+Request logs answer "what happened?" only if you trust whoever runs the database. Receipts make the gateway's record of each request checkable: anyone without the signing key cannot alter or forge one undetected.
+
+A receipt proves what the **gateway recorded**, not that a provider served the response or that it was correct. The exact guarantees and limits are in the [trust model](receipt-spec.md#1-trust-model--what-a-receipt-proves); the byte-level format and test vectors for independent verifiers are in the [draft receipt spec](receipt-spec.md).
 
 ## What a receipt attests
 
@@ -19,15 +21,15 @@ Request logs answer "what happened?" only if you trust whoever runs the database
 ```
 
 - Signed with Ed25519 as a compact JWS (`alg: EdDSA`, `typ: tpx-receipt+jwt`). The public key is published at `/.well-known/theophylax-receipt-keys.json` (RFC 8037 JWK set).
-- The key is derived from the master key, or set explicitly with `THEOPHYLAX_RECEIPT_SEED` (32 bytes, base64) so you can hold it in an HSM-backed secret and rotate deliberately.
+- The key is derived from the master key, or set explicitly with `THEOPHYLAX_RECEIPT_SEED` (32 bytes, base64) so it can live in its own secret. Anyone with the key can sign receipts, so protect it like the master key. Only the current key is published: changing it means older receipts no longer verify against the live key set, so keep a copy of each key set you have used (published key history is on the [roadmap](../ROADMAP.md)).
 - Policy `digest` identifies the exact rule set version in force — not just its name.
 - **No content**: only digests, identities, routing, counts and cost. Receipts can be given to auditors, customers or a regulator.
 
 ## Delivery
 
 - Header `X-Theophylax-Receipt: <request id>` on every response.
-- Streaming responses end with an SSE comment `: theophylax-receipt <jws>` (ignored by SSE clients).
-- `GET /v1/receipts/{request_id}` with the same credential returns the JWS, verification status and anchoring proof.
+- Streaming responses end with an SSE comment `: theophylax-receipt <jws>` (ignored by SSE clients). The response digest covers everything sent before that line, so remove it before hashing a captured stream.
+- `GET /v1/receipts/{request_id}` with the same credential returns the JWS, its verification status, and whether the gateway has included it in a checkpoint. That anchoring status is computed by the gateway; receipts do not yet carry an inclusion proof you can check independently.
 
 ## Anchoring
 

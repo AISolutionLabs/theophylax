@@ -168,7 +168,7 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request) {
 			fail(util.Err(400, "invalid_request_error", res.Message))
 			return
 		}
-		st.restorer = guardrails.NewRestorer(res.Restore)
+		st.restorer = guardrails.NewRestorer(res.Restore, res.RestoreAllow, res.Tainted)
 	}
 	st.capture = g.capturePayloads(snap, p) && form == nil
 	if st.capture {

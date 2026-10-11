@@ -335,7 +335,7 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 			fail(util.Err(400, "invalid_request_error", res.Message))
 			return
 		}
-		st.restorer = guardrails.NewRestorer(res.Restore)
+		st.restorer = guardrails.NewRestorer(res.Restore, res.RestoreAllow, res.Tainted)
 		st.canaries, st.tainted = res.Canaries, res.Tainted
 	}
 	st.capture = g.capturePayloads(snap, p)
@@ -849,6 +849,10 @@ func (g *Gateway) capturePayloads(snap *Snapshot, p *auth.Principal) bool {
 
 func (g *Gateway) finish(st *reqState) {
 	st.log.LatencyMS = int(time.Since(st.start).Milliseconds())
+	if n := st.restorer.Withheld(); n > 0 {
+		st.gr = append(st.gr, guardrails.Finding{Policy: "Secret Shield", Rule: "secrets", Action: "restore_withheld", Count: n, Phase: "output",
+			Detail: "placeholders left in place: inside a link to a host not in allow_domains, or in a tool call after injection signals"})
+	}
 	if len(st.gr) > 0 {
 		st.log.Guardrails, _ = json.Marshal(st.gr)
 		for _, f := range st.gr {

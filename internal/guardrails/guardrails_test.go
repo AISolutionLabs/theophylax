@@ -82,7 +82,7 @@ func TestSecretShieldRestore(t *testing.T) {
 		t.Fatal("placeholder not stable")
 	}
 	// Streaming restore across a split placeholder
-	r := NewRestorer(res.Restore)
+	r := NewRestorer(res.Restore, nil, false)
 	out := r.Feed("0", "token is "+ph[:7], false) + r.Feed("0", ph[7:]+" ok", false) + r.Flush("0", false)
 	if out != "token is "+secret+" ok" {
 		t.Fatalf("stream restore: %q", out)

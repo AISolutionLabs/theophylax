@@ -74,6 +74,9 @@ type Result struct {
 	Findings []Finding
 	// Restore maps placeholders to original values for "restore on return".
 	Restore map[string]string
+	// RestoreAllow lists hosts a restored secret may appear in a URL for
+	// (the secrets rule's allow_domains; "*" allows any host).
+	RestoreAllow []string
 	// Prompt-injection state carried from the input phase to the output phase.
 	Canaries       []string
 	Tainted        bool
@@ -422,6 +425,7 @@ func (e *Engine) evalRule(ctx context.Context, p Policy, r Rule, monitor bool, i
 				res.Restore = map[string]string{}
 			}
 			restore = res.Restore
+			res.RestoreAllow = append(res.RestoreAllow, r.AllowDomains...)
 		}
 		counts := map[string]int{}
 		for _, t := range texts {

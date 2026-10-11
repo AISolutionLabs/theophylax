@@ -599,6 +599,11 @@ func (a *API) updateUser(c *Ctx) (any, error) {
 		Status        *string `json:"status"`
 		PlatformAdmin *bool   `json:"is_platform_admin"`
 		Password      *string `json:"password"`
+		// IdpID binds the account to an identity provider so it can sign in
+		// through it ("" unbinds). Identity providers never link accounts that
+		// are platform admins or belong to other organizations on their own, so
+		// this is the explicit, platform-admin-approved way to do it.
+		IdpID *string `json:"idp_id"`
 	}
 	if err := c.Decode(&in); err != nil {
 		return nil, err
@@ -615,6 +620,19 @@ func (a *API) updateUser(c *Ctx) (any, error) {
 	if in.PlatformAdmin != nil {
 		u.IsPlatformAdmin = *in.PlatformAdmin
 	}
+	if in.IdpID != nil {
+		if *in.IdpID == "" {
+			u.IdpID, u.ExternalID = nil, nil
+		} else {
+			if _, err := store.GetByID[store.IdP](c, a.St.Pool, "idp_providers", *in.IdpID); err != nil {
+				return nil, badReq("idp_id: identity provider not found")
+			}
+			if u.IdpID == nil || *u.IdpID != *in.IdpID {
+				u.ExternalID = nil // re-learnt from the IdP subject at next sign-in
+			}
+			u.IdpID = in.IdpID
+		}
+	}
 	if in.Password != nil {
 		if len(*in.Password) < 12 {
 			return nil, badReq("password must be at least 12 characters")
@@ -629,6 +647,6 @@ func (a *API) updateUser(c *Ctx) (any, error) {
 		return nil, err
 	}
 	a.Res.Invalidate()
-	c.Audit("user.update", "", "user", u.ID, map[string]any{"status": u.Status, "platform_admin": u.IsPlatformAdmin, "password_reset": in.Password != nil})
+	c.Audit("user.update", "", "user", u.ID, map[string]any{"status": u.Status, "platform_admin": u.IsPlatformAdmin, "password_reset": in.Password != nil, "idp_id": util.Deref(u.IdpID)})
 	return u, nil
 }

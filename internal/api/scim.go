@@ -226,12 +226,20 @@ func (a *API) scimCreateUser(c *scimCtx) (any, int, error) {
 	} else if err != nil {
 		return nil, 0, err
 	} else {
+		// An existing account may only be adopted by an IdP allowed to manage it
+		// (see auth.Resolver.CanManageIdentity); otherwise one organization's SCIM
+		// client could bind a platform admin or another tenant's user to itself.
+		ok, err := a.Res.CanManageIdentity(c, u, c.idp)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !ok {
+			return nil, 0, util.Err(409, "uniqueness", "a user with this email already exists and is managed outside this identity provider's organization")
+		}
 		if in.ExternalID != "" {
 			u.ExternalID = &in.ExternalID
 		}
-		if u.IdpID == nil {
-			u.IdpID = &c.idp.ID
-		}
+		u.IdpID = &c.idp.ID
 		_ = a.St.Update(c, a.St.Pool, "users", u)
 	}
 	a.setOrgActive(c, u, in.Active == nil || *in.Active)
@@ -264,17 +272,25 @@ func (a *API) scimPutUser(c *scimCtx) (any, int, error) {
 	if err := c.Decode(&in); err != nil {
 		return nil, 0, err
 	}
-	if n := in.name(); n != "" {
-		u.Name = n
-	}
-	if e := in.email(); e != "" {
-		u.Email = e
-	}
-	if in.ExternalID != "" {
-		u.ExternalID = &in.ExternalID
-	}
-	if err := a.St.Update(c, a.St.Pool, "users", u); err != nil {
+	canEdit, err := a.Res.CanManageIdentity(c, u, c.idp)
+	if err != nil {
 		return nil, 0, err
+	}
+	// Name, email and externalId are global to the account; only change them when
+	// this IdP manages it. Membership in this organization (active) is always ours.
+	if canEdit {
+		if n := in.name(); n != "" {
+			u.Name = n
+		}
+		if e := in.email(); e != "" {
+			u.Email = e
+		}
+		if in.ExternalID != "" {
+			u.ExternalID = &in.ExternalID
+		}
+		if err := a.St.Update(c, a.St.Pool, "users", u); err != nil {
+			return nil, 0, err
+		}
 	}
 	if in.Active != nil {
 		a.setOrgActive(c, u, *in.Active)
@@ -296,6 +312,10 @@ func (a *API) scimPatchUser(c *scimCtx) (any, int, error) {
 		} `json:"Operations"`
 	}
 	if err := c.Decode(&in); err != nil {
+		return nil, 0, err
+	}
+	canEdit, err := a.Res.CanManageIdentity(c, u, c.idp)
+	if err != nil {
 		return nil, 0, err
 	}
 	for _, op := range in.Operations {
@@ -333,8 +353,14 @@ func (a *API) scimPatchUser(c *scimCtx) (any, int, error) {
 			}
 		}
 	}
-	if err := a.St.Update(c, a.St.Pool, "users", u); err != nil {
-		return nil, 0, err
+	// Profile changes (name, email, externalId) only persist when this IdP
+	// manages the account; "active" was applied to this organization above.
+	if canEdit {
+		if err := a.St.Update(c, a.St.Pool, "users", u); err != nil {
+			return nil, 0, err
+		}
+	} else if fresh, err := store.GetByID[store.User](c, a.St.Pool, "users", u.ID); err == nil {
+		u = fresh
 	}
 	return a.scimUserResource(c, u), 200, nil
 }

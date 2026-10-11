@@ -206,12 +206,76 @@ func (r *Resolver) FromIdPToken(ctx context.Context, token string, idps []*store
 	return nil, util.Err(401, "authentication_error", "token issuer is not trusted")
 }
 
+// CanManageIdentity reports whether idp may act on the existing account u:
+// sign in as it, or change its global profile through SCIM. An IdP is
+// configured by an organization owner, so it is trusted only inside that
+// organization. It may act on a user who is already bound to it, or on a user
+// who is not a platform admin, is not bound to another organization's IdP, and
+// has no memberships outside the IdP's organization. Anything else would let
+// one organization's owner take over a platform admin or another tenant's user
+// simply by asserting their email.
+func (r *Resolver) CanManageIdentity(ctx context.Context, u *store.User, idp *store.IdP) (bool, error) {
+	if u.IdpID != nil && *u.IdpID == idp.ID {
+		return true, nil
+	}
+	if u.IsPlatformAdmin {
+		return false, nil
+	}
+	if u.IdpID != nil {
+		var org string
+		err := r.St.Pool.QueryRow(ctx, `SELECT org_id FROM idp_providers WHERE id=$1`, *u.IdpID).Scan(&org)
+		if err == nil && org != idp.OrgID {
+			return false, nil
+		}
+	}
+	var elsewhere bool
+	if err := r.St.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM memberships WHERE user_id=$1 AND org_id<>$2)`, u.ID, idp.OrgID).Scan(&elsewhere); err != nil {
+		return false, err
+	}
+	return !elsewhere, nil
+}
+
+// ScopeInOrg reports whether an org/team/project scope belongs to orgID.
+func (r *Resolver) ScopeInOrg(ctx context.Context, scopeType, scopeID, orgID string) bool {
+	var q string
+	switch scopeType {
+	case "org":
+		return scopeID == orgID
+	case "team":
+		q = `SELECT EXISTS (SELECT 1 FROM teams WHERE id=$1 AND org_id=$2)`
+	case "project":
+		q = `SELECT EXISTS (SELECT 1 FROM projects WHERE id=$1 AND org_id=$2)`
+	default:
+		return false
+	}
+	var ok bool
+	if err := r.St.Pool.QueryRow(ctx, q, scopeID, orgID).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
+}
+
+// emailUnverified reports an explicit email_verified=false claim. Many IdPs
+// (Entra ID among them) omit the claim, so only an explicit false is refused.
+func emailUnverified(c Claims) bool {
+	switch v := c["email_verified"].(type) {
+	case bool:
+		return !v
+	case string:
+		return strings.EqualFold(v, "false")
+	}
+	return false
+}
+
 // Provision finds or JIT-creates the user for verified claims and applies
 // group → role mappings.
 func (r *Resolver) Provision(ctx context.Context, idp *store.IdP, c Claims) (*store.User, error) {
 	email := c.Email()
 	if email == "" {
 		return nil, util.Err(403, "permission_error", "identity token has no email claim")
+	}
+	if emailUnverified(c) {
+		return nil, util.Err(403, "permission_error", "the identity provider reports this email address as unverified")
 	}
 	if len(idp.EmailDomains) > 0 {
 		ok := false
@@ -225,13 +289,25 @@ func (r *Resolver) Provision(ctx context.Context, idp *store.IdP, c Claims) (*st
 		}
 	}
 	name := c.Str("name")
-	u, err := r.St.UserByEmail(ctx, email)
+	sub := c.Str("sub")
+	// Prefer the IdP's stable subject for users already bound to this IdP, so a
+	// changed email still finds the same account.
+	var u *store.User
+	var err error
+	if sub != "" {
+		u, err = store.Get[store.User](ctx, r.St.Pool, `SELECT * FROM users WHERE idp_id=$1 AND external_id=$2`, idp.ID, sub)
+		if err != nil && err != util.ErrNotFound {
+			return nil, err
+		}
+	}
+	if u == nil {
+		u, err = r.St.UserByEmail(ctx, email)
+	}
 	if err == util.ErrNotFound {
 		if !idp.JIT {
 			return nil, util.Err(403, "permission_error", "user is not provisioned; contact your administrator")
 		}
 		u = &store.User{ID: util.NewID("usr"), Email: email, Name: name, Status: "active", IdpID: &idp.ID}
-		sub := c.Str("sub")
 		u.ExternalID = &sub
 		if err := r.St.Insert(ctx, r.St.Pool, "users", u); err != nil {
 			return nil, err
@@ -239,6 +315,26 @@ func (r *Resolver) Provision(ctx context.Context, idp *store.IdP, c Claims) (*st
 		slog.Info("jit provisioned user", "email", email, "idp", idp.Name)
 	} else if err != nil {
 		return nil, err
+	} else if u.IdpID == nil || *u.IdpID != idp.ID {
+		// An existing account with this email that isn't bound to this IdP.
+		ok, err := r.CanManageIdentity(ctx, u, idp)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			slog.Warn("idp sign-in refused: account is managed outside this identity provider's organization", "idp", idp.Name, "user_id", u.ID)
+			return nil, util.Err(403, "permission_error", "this account is managed by another sign-in method; ask a platform administrator to link it")
+		}
+		// Bind it so later sign-ins match on the IdP subject.
+		u.IdpID = &idp.ID
+		u.ExternalID = &sub
+		if _, err := r.St.Pool.Exec(ctx, `UPDATE users SET idp_id=$2, external_id=$3 WHERE id=$1`, u.ID, idp.ID, sub); err != nil {
+			return nil, err
+		}
+	} else if sub != "" && (u.ExternalID == nil || *u.ExternalID == "") {
+		// Bound by an administrator; learn the subject on first sign-in.
+		u.ExternalID = &sub
+		_, _ = r.St.Pool.Exec(ctx, `UPDATE users SET external_id=$2 WHERE id=$1`, u.ID, sub)
 	}
 	if u.Status != "active" {
 		return nil, util.Err(403, "permission_error", "account suspended")
@@ -260,7 +356,9 @@ func (r *Resolver) Provision(ctx context.Context, idp *store.IdP, c Claims) (*st
 		want[[2]string{"org", idp.OrgID}] = idp.DefaultRole
 	}
 	for _, m := range maps {
-		if groups[m.Group] && ValidRole(m.Role) {
+		// Never grant roles outside the IdP's own organization, even if a stored
+		// mapping (saved before validation existed) points elsewhere.
+		if groups[m.Group] && ValidRole(m.Role) && r.ScopeInOrg(ctx, m.ScopeType, m.ScopeID, idp.OrgID) {
 			k := [2]string{m.ScopeType, m.ScopeID}
 			if RoleRank(m.Role) > RoleRank(want[k]) {
 				want[k] = m.Role

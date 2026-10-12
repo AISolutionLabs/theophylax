@@ -61,6 +61,7 @@ func (g *Gateway) begin(w http.ResponseWriter, r *http.Request, cf providers.For
 	st.hw = &hashWriter{ResponseWriter: w, h: sha256.New()}
 	st.hw.Header().Set("X-Theophylax-Receipt", reqID)
 	st.log.OrgID, st.log.TeamID, st.log.ProjectID = strPtr(p.OrgID), strPtr(p.TeamID), strPtr(p.ProjectID)
+	setTags(w, r, p, st)
 	if p.Key != nil {
 		st.log.KeyID = &p.Key.ID
 	}

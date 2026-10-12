@@ -43,6 +43,27 @@ func (a *API) logFilter(c *Ctx, orgID string, args *[]any) string {
 	return fmt.Sprintf("%s AND (l.team_id = ANY($%d) OR l.project_id = ANY($%d) OR l.user_id=$%d)", cond, n-2, n-1, n)
 }
 
+// tagFilter turns the "tag" query parameter ("k:v,k2:v2"; all must match)
+// into a containment condition on request_logs.tags.
+func tagFilter(c *Ctx, args *[]any) (string, error) {
+	raw := c.Query("tag")
+	if raw == "" {
+		return "", nil
+	}
+	want := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(pair), ":")
+		k = strings.ToLower(strings.TrimSpace(k))
+		if !ok || !gateway.ValidTagKey(k) || strings.TrimSpace(v) == "" {
+			return "", badReq("tag filter must be key:value pairs separated by commas")
+		}
+		want[k] = strings.TrimSpace(v)
+	}
+	b, _ := json.Marshal(want)
+	*args = append(*args, string(b))
+	return fmt.Sprintf(" AND l.tags @> $%d::jsonb", len(*args)), nil
+}
+
 type logView struct {
 	store.RequestLog
 	KeyName     *string `json:"key_name" db:"key_name"`
@@ -62,6 +83,11 @@ func (a *API) listLogs(c *Ctx) (any, error) {
 		args = append(args, v)
 		where += fmt.Sprintf(" AND "+cond, len(args))
 	}
+	tf, err := tagFilter(c, &args)
+	if err != nil {
+		return nil, err
+	}
+	where += tf
 	q := c.R.URL.Query()
 	if v := q.Get("model"); v != "" {
 		add("l.model=$%d", v)
@@ -194,6 +220,11 @@ func (a *API) usage(c *Ctx) (any, error) {
 		args = append(args, c.P.UserID())
 		where += fmt.Sprintf(" AND l.user_id=$%d", len(args))
 	}
+	tf, err := tagFilter(c, &args)
+	if err != nil {
+		return nil, err
+	}
+	where += tf
 
 	series := []bucket{}
 	rows, err := a.St.Pool.Query(c, `SELECT date_trunc('`+interval+`', l.ts AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS t, count(*), count(*) FILTER (WHERE status>=400),
@@ -214,6 +245,7 @@ func (a *API) usage(c *Ctx) (any, error) {
 	series = fillBuckets(series, interval, days)
 
 	groupCol, labelSQL := "l.model", "l.model"
+	bargs := args // the breakdown query may take one extra parameter
 	switch c.Query("group_by") {
 	case "team":
 		groupCol, labelSQL = "l.team_id", "COALESCE((SELECT name FROM teams WHERE id=l.team_id),'—')"
@@ -227,12 +259,23 @@ func (a *API) usage(c *Ctx) (any, error) {
 		groupCol, labelSQL = "l.provider_id", "COALESCE((SELECT name FROM providers WHERE id=l.provider_id),'—')"
 	case "agent":
 		groupCol, labelSQL = "l.agent_id", "COALESCE((SELECT name FROM agents WHERE id=l.agent_id),'(no agent)')"
+	default:
+		// group_by=tag:<key> breaks usage down by the value of one request tag.
+		if k, ok := strings.CutPrefix(c.Query("group_by"), "tag:"); ok {
+			k = strings.ToLower(k)
+			if !gateway.ValidTagKey(k) {
+				return nil, badReq("group_by tag key must be lower-case letters, digits, '.', '_' or '-'")
+			}
+			bargs = append(append([]any{}, args...), k)
+			groupCol = fmt.Sprintf("l.tags->>$%d", len(bargs))
+			labelSQL = fmt.Sprintf("COALESCE(l.tags->>$%d,'(untagged)')", len(bargs))
+		}
 	}
 	breakdown := []breakdownRow{}
 	rows, err = a.St.Pool.Query(c, `SELECT COALESCE(`+groupCol+`,''), min(`+labelSQL+`), count(*), count(*) FILTER (WHERE status>=400),
 		COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0), COALESCE(sum(cache_read_tokens),0), COALESCE(sum(cost_usd),0),
 		COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms),0), COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms),0)
-		FROM request_logs l WHERE `+where+` GROUP BY 1 ORDER BY 8 DESC, 3 DESC LIMIT 50`, args...)
+		FROM request_logs l WHERE `+where+` GROUP BY 1 ORDER BY 8 DESC, 3 DESC LIMIT 50`, bargs...)
 	if err != nil {
 		return nil, err
 	}

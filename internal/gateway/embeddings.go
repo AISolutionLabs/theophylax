@@ -40,6 +40,7 @@ func (g *Gateway) embeddings(w http.ResponseWriter, r *http.Request) {
 	w = st.hw
 	w.Header().Set("X-Theophylax-Receipt", reqID)
 	st.log.OrgID, st.log.TeamID, st.log.ProjectID = strPtr(p.OrgID), strPtr(p.TeamID), strPtr(p.ProjectID)
+	setTags(w, r, p, st)
 	if p.Key != nil {
 		st.log.KeyID = &p.Key.ID
 	}

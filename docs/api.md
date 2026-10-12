@@ -21,6 +21,18 @@
 | POST | `/v1/receipts/verify` | Public verification helper |
 | GET | `/.well-known/theophylax-receipt-keys.json` | Receipt public keys |
 
+### Request tags
+
+Label requests for chargeback and analytics with up to 10 `key=value` pairs in `X-Theophylax-Tags`:
+
+```http
+X-Theophylax-Tags: feature=search, env=prod, ticket=OPS-123
+```
+
+Keys are lower-case letters, digits, `.`, `_` and `-` (up to 40 characters); values up to 128 characters. A gateway key can carry default tags in its metadata (`{"tags": {"cost_center": "cc-42"}}`), and header tags win on conflict. Invalid pairs are dropped and counted in the `X-Theophylax-Tags-Dropped` response header; the request still goes through. Tags are stored with the request log, exported as `theophylax.tag.<key>` span attributes and in log-sink records, and never sent to the model. With the SDKs, set them as default headers, e.g. `Anthropic(default_headers={"X-Theophylax-Tags": "feature=search"})`.
+
+Filter with `?tag=feature:search,env:prod` (all must match) on `GET /api/orgs/{org}/logs` and `/usage`, and break usage down by one tag with `/usage?group_by=tag:feature`.
+
 ## Control plane (session or personal access token `tpxp_…`)
 
 Auth: `GET /api/auth/config`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /auth/oidc/{idp}/start`, `GET /api/me`, `POST /api/me/password`.

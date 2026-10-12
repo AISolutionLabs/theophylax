@@ -13,7 +13,7 @@ export default function Requests() {
   const [sp, setSp] = useSearchParams()
   const projects = useProjects()
   const models = useRoutableModels()
-  const [f, setF] = useState({ status: '', model: '', project_id: '', request_id: sp.get('id') ?? '', since: '24h' })
+  const [f, setF] = useState({ status: '', model: '', project_id: '', request_id: sp.get('id') ?? '', tag: '', since: '24h' })
   const [open, setOpen] = useState<string | null>(sp.get('id'))
   const logs = useQuery({
     queryKey: ['logs', org.id, f],
@@ -32,6 +32,7 @@ export default function Requests() {
         </>} />
       <div className="row wrap" style={{ marginBottom: 14 }}>
         <Input placeholder="Request ID" value={f.request_id} onChange={set('request_id')} style={{ width: 260 }} />
+        <Input placeholder="Tags, e.g. feature:search" value={f.tag} onChange={set('tag')} style={{ width: 220 }} aria-label="Filter by tags" />
         <Select value={f.status} onChange={set('status')} style={{ width: 170 }} options={[{ value: '', label: 'Any outcome' }, { value: 'ok', label: 'Succeeded' }, { value: 'error', label: 'Failed' }, { value: 'guardrail', label: 'Guardrail acted' }]} />
         <Select value={f.model} onChange={set('model')} style={{ width: 200 }} options={[{ value: '', label: 'Any model' }, ...models.data.map((m) => ({ value: m.name, label: m.name }))]} />
         <Select value={f.project_id} onChange={set('project_id')} style={{ width: 220 }} options={[{ value: '', label: 'Any project' }, ...(projects.data ?? []).map((p) => ({ value: p.id, label: `${p.team_name} / ${p.name}` }))]} />
@@ -103,6 +104,7 @@ function RequestDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 <dt>Cost</dt><dd>{fmtUSD(l.cost_usd, true)} <span className="muted">{l.price_key === 'mock' ? '· mock provider, not billed' : l.price_key ? <>· list price <span className="mono">{l.price_key}</span></> : l.input_tokens + l.output_tokens > 0 ? '· no upstream list price found' : ''}</span></dd>
                 <dt>Latency</dt><dd>{fmtMs(l.latency_ms)} total · {fmtMs(l.ttfb_ms)} to first byte {l.stream && '(streamed)'}</dd>
                 <dt>Client</dt><dd>{l.client_ip} · <span className="muted">{l.user_agent}</span></dd>
+                {l.tags && Object.keys(l.tags).length > 0 && <><dt>Tags</dt><dd className="row wrap" style={{ gap: 4 }}>{Object.entries(l.tags).sort().map(([k, v]) => <Badge key={k}><span className="mono">{k}={v}</span></Badge>)}</dd></>}
               </dl>
               <div>
                 <h3 style={{ marginBottom: 8 }}>Guardrails</h3>

@@ -29,6 +29,15 @@ const fixture = `{
   "eu.anthropic.claude-opus-5-5": {"litellm_provider": "bedrock_converse", "input_cost_per_token": 4.4e-06, "output_cost_per_token": 2.2e-05},
   "vertex_ai/claude-sonnet-5-5": {"litellm_provider": "vertex_ai-anthropic_models", "input_cost_per_token": 2e-06, "output_cost_per_token": 1e-05},
   "azure_ai/claude-opus-5-5": {"litellm_provider": "azure_ai", "input_cost_per_token": 4e-06, "output_cost_per_token": 2e-05},
+  "claude-haiku-5-5": {"litellm_provider": "anthropic", "input_cost_per_token": 1e-07, "output_cost_per_token": 5e-07,
+    "cache_read_input_token_cost": 1e-08, "cache_creation_input_token_cost": 1.25e-07, "cache_creation_input_token_cost_above_1hr": 2e-07,
+    "input_cost_per_token_above_100k_tokens": 5e-07, "output_cost_per_token_above_100k_tokens": 2.5e-06,
+    "cache_read_input_token_cost_above_100k_tokens": 5e-08, "cache_creation_input_token_cost_above_100k_tokens": 6.25e-07,
+    "cache_creation_input_token_cost_above_1hr_above_100k_tokens": 1e-06},
+  "us.anthropic.claude-haiku-5-5": {"litellm_provider": "bedrock_converse", "input_cost_per_token": 1.1e-07, "output_cost_per_token": 5.5e-07,
+    "input_cost_per_token_above_100k_tokens": 5.5e-07, "output_cost_per_token_above_100k_tokens": 2.75e-06},
+  "vertex_ai/claude-haiku-5-5": {"litellm_provider": "vertex_ai-anthropic_models", "input_cost_per_token": 1e-07, "output_cost_per_token": 5e-07},
+  "azure_ai/claude-haiku-5-5": {"litellm_provider": "azure_ai", "input_cost_per_token": 1e-07, "output_cost_per_token": 5e-07, "deprecation_date": "2027-09-29"},
   "text-embedding-3-small": {"litellm_provider": "openai", "input_cost_per_token": 2e-08, "output_cost_per_token": 0},
   "dall-e-3": {"litellm_provider": "openai", "output_cost_per_image": 0.04}
 }`
@@ -124,6 +133,58 @@ func TestLongContextTier(t *testing.T) {
 	}
 }
 
+// Haiku 5.5 is the first Claude model whose long-context tier starts at 100k
+// prompt tokens, and its catalog entry is the first to carry a combined
+// "_above_1hr_above_100k_tokens" rate for 1-hour cache writes.
+func TestHaiku55TierAt100k(t *testing.T) {
+	c := catalog(t)
+	p := c.Lookup(providers.KindAnthropic, "claude-haiku-5-5")
+	if p == nil || len(p.Tiers) != 1 || p.Tiers[0].Above != 100000 {
+		t.Fatalf("tiers = %+v, want one tier above 100000", p)
+	}
+	if r := p.Tiers[0].Rates; r.CacheWrite1h == nil || !near(*r.CacheWrite1h, 1e-06) {
+		t.Fatalf("1h cache write above 100k not parsed: %+v", r)
+	}
+	// Exactly 100k prompt tokens: base rates.
+	u := providers.Usage{Input: 60000, CacheRead: 30000, CacheWrite: 10000, CacheWrite1h: 4000, Output: 2000}
+	got, _ := c.Cost(providers.KindAnthropic, u, "claude-haiku-5-5")
+	want := 60000*1e-07 + 30000*1e-08 + 6000*1.25e-07 + 4000*2e-07 + 2000*5e-07
+	if !near(got, want) {
+		t.Fatalf("base cost = %v, want %v", got, want)
+	}
+	// One token more: every token at the >100k rates.
+	u.Input++
+	got, _ = c.Cost(providers.KindAnthropic, u, "claude-haiku-5-5")
+	want = 60001*5e-07 + 30000*5e-08 + 6000*6.25e-07 + 4000*1e-06 + 2000*2.5e-06
+	if !near(got, want) {
+		t.Fatalf("tiered cost = %v, want %v", got, want)
+	}
+}
+
+func TestHaiku55PlatformIDs(t *testing.T) {
+	c := catalog(t)
+	for _, tc := range []struct {
+		kind string
+		id   string
+		want string
+	}{
+		{providers.KindBedrock, "us.anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5"},
+		{providers.KindBedrock, "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-haiku-5-5", "us.anthropic.claude-haiku-5-5"},
+		{providers.KindVertex, "claude-haiku-5-5", "vertex_ai/claude-haiku-5-5"},
+		{providers.KindAzureFoundry, "claude-haiku-5-5", "azure_ai/claude-haiku-5-5"},
+	} {
+		p := c.Lookup(tc.kind, tc.id)
+		if p == nil || p.Key != tc.want {
+			t.Errorf("Lookup(%s, %s) = %+v, want %s", tc.kind, tc.id, p, tc.want)
+		}
+	}
+	// Bedrock geo profiles carry their own >100k tier.
+	got, _ := c.Cost(providers.KindBedrock, providers.Usage{Input: 150000, Output: 1000}, "us.anthropic.claude-haiku-5-5")
+	if want := 150000*5.5e-07 + 1000*2.75e-06; !near(got, want) {
+		t.Fatalf("bedrock tiered cost = %v, want %v", got, want)
+	}
+}
+
 func TestMissingCacheRatesUseInputRate(t *testing.T) {
 	c := catalog(t)
 	got, _ := c.Cost(providers.KindBedrock, providers.Usage{Input: 10, CacheRead: 10, CacheWrite: 10}, "anthropic.claude-sonnet-4-5-20250929-v1:0")
@@ -156,13 +217,13 @@ func TestRefreshFetchesCatalog(t *testing.T) {
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if st := c.Status(); st.Models != 15 || st.FetchedAt == nil || st.Source != srv.URL {
+	if st := c.Status(); st.Models != 19 || st.FetchedAt == nil || st.Source != srv.URL {
 		t.Fatalf("status: %+v", st)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "nope", 500) }))
 	defer bad.Close()
 	c.url = bad.URL
-	if err := c.Refresh(context.Background()); err == nil || c.Len() != 15 || c.Status().LastError == "" {
+	if err := c.Refresh(context.Background()); err == nil || c.Len() != 19 || c.Status().LastError == "" {
 		t.Fatal("a failed refresh must keep the previous prices and report the error")
 	}
 }

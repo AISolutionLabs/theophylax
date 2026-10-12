@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -138,14 +139,22 @@ func (p *Bedrock) ListModels(ctx context.Context) ([]DiscoveredModel, error) {
 	}
 	var fm struct {
 		ModelSummaries []struct {
-			ModelID   string `json:"modelId"`
-			ModelName string `json:"modelName"`
+			ModelID        string   `json:"modelId"`
+			ModelName      string   `json:"modelName"`
+			InferenceTypes []string `json:"inferenceTypesSupported"`
 		} `json:"modelSummaries"`
 	}
 	if err := getJSON(ctx, p.client, req, &fm); err != nil {
 		return nil, err
 	}
 	for _, m := range fm.ModelSummaries {
+		// Models served only through cross-region inference profiles (e.g.
+		// Claude Haiku 5.5) cannot be invoked by their bare model ID; offering
+		// them would add a deployment that always fails. Their profiles are
+		// listed below.
+		if len(m.InferenceTypes) > 0 && !slices.Contains(m.InferenceTypes, "ON_DEMAND") {
+			continue
+		}
 		out = append(out, DiscoveredModel{ID: m.ModelID, DisplayName: m.ModelName, Kind: "foundation"})
 	}
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, p.control+"/inference-profiles?maxResults=1000", nil)

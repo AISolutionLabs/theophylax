@@ -37,7 +37,7 @@ CI rejects pull requests with unsigned commits.
 
 ## Development
 
-Requirements: Go 1.26 or later (the `toolchain` line in `go.mod` selects 1.27.1), Node 22, Postgres 16.
+Requirements: Go 1.26 or later (the `toolchain` line in `go.mod` selects 1.27.2), Node 22, Postgres 16.
 
 ```bash
 make ui build                       # console + binary

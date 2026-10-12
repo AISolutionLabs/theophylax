@@ -162,6 +162,9 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 
 	mux := http.NewServeMux()
 	gw.Routes(mux)
+	batches := &gateway.Batches{G: gw, Box: box, Workers: cfg.BatchWorkers}
+	batches.Routes(mux)
+	go batches.Run(bg)
 	gw.ReceiptRoutes(mux)
 	ap.Routes(mux)
 	ap.SkillRoutes(mux)

@@ -12,6 +12,7 @@ Public priorities for Theophylax. Dates are intentionally omitted: this is a sta
 ## Next
 
 - **Identity chain.** Record and enforce the chain human → agent → tool → model → data, so a receipt can say which person or workflow was responsible, not only which key.
+- **Provider batch offload.** Hand message batches to a provider's own batch service (Anthropic Message Batches, Bedrock batch inference, Vertex batch prediction) when every request routes there, so the provider's batch discount applies; and the OpenAI Batch and Files APIs alongside the Anthropic-shaped one.
 - **Per-identity-provider accounts**, removing the global email-uniqueness limitation described below.
 - **Independent injection evaluation.** Evaluation sets beyond the synthetic corpus, and a public log of reported bypasses and fixes.
 

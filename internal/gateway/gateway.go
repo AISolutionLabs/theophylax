@@ -69,6 +69,9 @@ func (g *Gateway) Routes(mux *http.ServeMux) {
 
 func (g *Gateway) authenticate(r *http.Request) (*auth.Principal, error) {
 	ctx := r.Context()
+	if p, ok := ctx.Value(principalCtxKey{}).(*auth.Principal); ok {
+		return p, nil // internal request (message batches), authenticated by its creator
+	}
 	tok := auth.BearerToken(r)
 	snap := g.Loader.Snapshot()
 	var p *auth.Principal

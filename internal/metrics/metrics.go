@@ -186,6 +186,7 @@ var (
 	Cost           = Default.Counter("theophylax_cost_usd_total", "Estimated spend in USD", "model")
 	UpstreamErrors = Default.Counter("theophylax_upstream_errors_total", "Upstream failures (incl. retried)", "provider", "status")
 	Guardrail      = Default.Counter("theophylax_guardrail_actions_total", "Guardrail actions", "rule", "action")
+	BatchRequests  = Default.Counter("theophylax_batch_requests_total", "Message batch requests by outcome (queued, succeeded, errored, canceled, expired)", "status")
 	LogDropped     = Default.Counter("theophylax_log_dropped_total", "Request logs dropped due to back-pressure")
 	Cache          = Default.Counter("theophylax_cache_total", "Response cache lookups", "result")
 	Latency        = Default.Histogram("theophylax_request_duration_seconds", "End-to-end request latency", []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300}, "model")

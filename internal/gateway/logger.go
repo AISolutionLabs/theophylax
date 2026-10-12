@@ -100,7 +100,7 @@ func (l *RequestLogger) Run(ctx context.Context) {
 // Wait blocks until Run has drained on shutdown.
 func (l *RequestLogger) Wait() { <-l.done }
 
-var logCols = []string{"id", "ts", "org_id", "team_id", "project_id", "user_id", "key_id", "agent_id", "endpoint", "model", "upstream_model", "provider_id", "provider_kind", "status", "error", "stream", "latency_ms", "ttfb_ms", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "price_key", "attempts", "guardrails", "client_ip", "user_agent"}
+var logCols = []string{"id", "ts", "org_id", "team_id", "project_id", "user_id", "key_id", "agent_id", "endpoint", "model", "upstream_model", "provider_id", "provider_kind", "status", "error", "stream", "latency_ms", "ttfb_ms", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "price_key", "attempts", "guardrails", "client_ip", "user_agent", "tags"}
 
 func (l *RequestLogger) flush(ctx context.Context, batch []*LogEntry) error {
 	agg := map[counterKey]*spend{}
@@ -129,7 +129,11 @@ func (l *RequestLogger) flush(ctx context.Context, batch []*LogEntry) error {
 			if len(gr) == 0 {
 				gr = json.RawMessage("[]")
 			}
-			rows[i] = []any{g.ID, g.TS, g.OrgID, g.TeamID, g.ProjectID, g.UserID, g.KeyID, g.AgentID, g.Endpoint, g.Model, g.UpstreamModel, g.ProviderID, g.ProviderKind, g.Status, g.Error, g.Stream, g.LatencyMS, g.TTFBMS, g.InputTokens, g.OutputTokens, g.CacheReadTokens, g.CacheWriteTokens, g.CostUSD, g.PriceKey, g.Attempts, string(gr), g.ClientIP, g.UserAgent}
+			tags := g.Tags
+			if len(tags) == 0 {
+				tags = json.RawMessage("{}")
+			}
+			rows[i] = []any{g.ID, g.TS, g.OrgID, g.TeamID, g.ProjectID, g.UserID, g.KeyID, g.AgentID, g.Endpoint, g.Model, g.UpstreamModel, g.ProviderID, g.ProviderKind, g.Status, g.Error, g.Stream, g.LatencyMS, g.TTFBMS, g.InputTokens, g.OutputTokens, g.CacheReadTokens, g.CacheWriteTokens, g.CostUSD, g.PriceKey, g.Attempts, string(gr), g.ClientIP, g.UserAgent, string(tags)}
 		}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"request_logs"}, logCols, pgx.CopyFromRows(rows)); err != nil {
 			return err

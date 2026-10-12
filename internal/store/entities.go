@@ -291,6 +291,7 @@ type RequestLog struct {
 	Guardrails       json.RawMessage `db:"guardrails" json:"guardrails"`
 	ClientIP         string          `db:"client_ip" json:"client_ip"`
 	UserAgent        string          `db:"user_agent" json:"user_agent"`
+	Tags             json.RawMessage `db:"tags" json:"tags"`
 }
 
 type AuditEntry struct {

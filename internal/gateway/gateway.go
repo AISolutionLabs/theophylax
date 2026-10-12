@@ -220,6 +220,7 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	}
 	w.Header().Set("X-Theophylax-Receipt", reqID)
 	st.log.OrgID, st.log.TeamID, st.log.ProjectID = strPtr(p.OrgID), strPtr(p.TeamID), strPtr(p.ProjectID)
+	setTags(w, r, p, st)
 	if p.Key != nil {
 		st.log.KeyID = &p.Key.ID
 	}

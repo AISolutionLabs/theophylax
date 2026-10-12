@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -434,6 +435,19 @@ func otlpSpan(r Request) map[string]any {
 	}
 	if len(l.Guardrails) > 2 {
 		attrs = append(attrs, sAttr("theophylax.guardrails", string(l.Guardrails)))
+	}
+	if len(l.Tags) > 2 {
+		var tags map[string]string
+		if json.Unmarshal(l.Tags, &tags) == nil {
+			keys := make([]string, 0, len(tags))
+			for k := range tags {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				attrs = append(attrs, sAttr("theophylax.tag."+k, tags[k]))
+			}
+		}
 	}
 	if r.ReceiptHash != "" {
 		attrs = append(attrs, sAttr("theophylax.receipt_sha256", r.ReceiptHash))

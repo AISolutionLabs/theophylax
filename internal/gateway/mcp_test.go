@@ -73,3 +73,24 @@ func TestApplyMCPStripsWhereUnsupported(t *testing.T) {
 		t.Fatalf("request without MCP changed: %v %v", out, h)
 	}
 }
+
+func TestToolAllowed(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		allow, deny []string
+		want        bool
+	}{
+		{"search", nil, nil, true},
+		{"search", []string{"search"}, nil, true},
+		{"delete", []string{"search"}, nil, false},
+		{"delete_repo", nil, []string{"delete_*"}, false},
+		{"deleter", nil, []string{"delete_*"}, true},
+		{"read_file", []string{"read_*"}, []string{"read_secrets"}, true},
+		{"read_secrets", []string{"read_*"}, []string{"read_secrets"}, false},
+		{"anything", []string{"*"}, nil, true},
+	} {
+		if got := ToolAllowed(c.name, c.allow, c.deny); got != c.want {
+			t.Errorf("%s allow=%v deny=%v: got %v", c.name, c.allow, c.deny, got)
+		}
+	}
+}

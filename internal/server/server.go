@@ -107,6 +107,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	}
 	respCache := &gateway.ResponseCache{St: st, Box: box}
 	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp, Pricing: prices, Cache: respCache}
+	gw.Box, gw.MCPClient = box, util.SafeHTTPClient(0, cfg.DevMode)
 	guard.Judge = gw.Judge
 	api.Version = version
 	smtpCfg, err := alerts.ParseSMTPURL(cfg.SMTPURL)
@@ -165,6 +166,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	batches := &gateway.Batches{G: gw, Box: box, Workers: cfg.BatchWorkers}
 	batches.Routes(mux)
 	go batches.Run(bg)
+	gw.MCPRoutes(mux)
 	gw.ReceiptRoutes(mux)
 	ap.Routes(mux)
 	ap.SkillRoutes(mux)

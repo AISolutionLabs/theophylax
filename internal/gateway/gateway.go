@@ -26,6 +26,7 @@ import (
 	"theophylax/internal/pricing"
 	"theophylax/internal/providers"
 	"theophylax/internal/receipts"
+	"theophylax/internal/secrets"
 	"theophylax/internal/store"
 	"theophylax/internal/util"
 )
@@ -46,6 +47,10 @@ type Gateway struct {
 	// OnBlock, if set, is told about every request a guardrail blocked (for alerts).
 	OnBlock func(orgID, policy, rule, detail string)
 	Cache   *ResponseCache // optional response cache
+	// Box opens credentials stored for MCP servers proxied through /mcp.
+	Box *secrets.Box
+	// MCPClient reaches proxied MCP servers (SSRF-guarded).
+	MCPClient *http.Client
 }
 
 func (g *Gateway) Routes(mux *http.ServeMux) {

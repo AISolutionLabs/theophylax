@@ -19,7 +19,7 @@ Public priorities for Theophylax. Dates are intentionally omitted: this is a sta
 ## Later
 
 - **External anchoring** of receipt checkpoints to a transparency log or WORM store.
-- **Agent governance**: deeper MCP governance, skill approvals and managed-agent policies, once the core security boundary is reliable and measured.
+- **Agent governance**: per-installation tool policies and per-tool rate limits for the MCP gateway, OAuth to upstream MCP servers on behalf of each person, skill approvals and managed-agent policies.
 
 ## Known limitations
 

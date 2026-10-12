@@ -230,11 +230,29 @@ func TestResponseCacheSecretShield(t *testing.T) {
 	if strings.Contains(string(enc), secret) {
 		t.Fatal("cache entry not encrypted")
 	}
-	time.Sleep(100 * time.Millisecond)
-	_, before := s.API.Budgets.Current("project", proj, "monthly")
+	// Wait until the first (live) request's spend has reached the budget:
+	// request logs are written asynchronously, more slowly under -race.
+	var before int64
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if _, before = s.API.Budgets.Current("project", proj, "monthly"); before > 0 {
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("the live request never reached the budget")
+	}
 	h2, t2 := ask()
 	if h1 != "miss" || h2 != "hit" || !strings.Contains(t2, secret) || t1 != t2 {
 		t.Fatalf("restore on hit: %s/%s %q", h1, h2, t2)
+	}
+	// Let the hit's log entry be persisted (which is when spend moves into
+	// the shared counters) before comparing.
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var n int
+		_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM request_logs WHERE project_id=$1 AND price_key='cache'`, proj).Scan(&n)
+		if n > 0 {
+			break
+		}
 	}
 	time.Sleep(100 * time.Millisecond)
 	if _, after := s.API.Budgets.Current("project", proj, "monthly"); after != before {

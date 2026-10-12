@@ -107,6 +107,9 @@ func (l *RequestLogger) flush(ctx context.Context, batch []*LogEntry) error {
 	reqs := map[counterKey]int64{}
 	for _, e := range batch {
 		tok := int64(e.Log.InputTokens + e.Log.OutputTokens + e.Log.CacheReadTokens + e.Log.CacheWriteTokens)
+		if e.Log.PriceKey == "cache" {
+			tok = 0 // response-cache hits replay usage for the log but spend nothing
+		}
 		for _, sc := range e.Scopes {
 			for _, p := range Periods {
 				k := counterKey{sc.Type, sc.ID, p, PeriodStart(p, e.Log.TS)}

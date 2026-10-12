@@ -8,7 +8,7 @@ These are commitments to the people who run Theophylax, and changes to them foll
 
 - **No paid edition.** Every feature in this repository is free and open source under Apache 2.0. There is no enterprise tier, no feature held back for paying customers, and no per-request fee on top of your model provider's bill. Capabilities that other gateways sell separately — SSO and SCIM, role-based access, audit logs, metrics, guardrails — are part of the project.
 - **No telemetry.** The gateway does not report usage, configuration or any other data to the project or to anyone else. Its only outbound calls are to the providers, identity providers and integrations you configure, and a periodic download of a public model-pricing catalog, which you can point elsewhere or turn off with `THEOPHYLAX_PRICING_URL` (`file://…` or `off`).
-- **No lock-in.** Clients use standard APIs (Anthropic Messages, OpenAI Chat Completions and Responses), telemetry goes out over OpenTelemetry and standard log sinks, receipts use an open, documented format, and all state lives in your own PostgreSQL database, so you can inspect, export or migrate everything.
+- **No lock-in.** Clients use standard APIs (Anthropic Messages, OpenAI Chat Completions and Responses), traces and logs export only to systems you choose, over OpenTelemetry and standard log sinks, receipts use an open, documented format, and all state lives in your own PostgreSQL database, so you can inspect, export or migrate everything.
 
 ## Maintainers
 

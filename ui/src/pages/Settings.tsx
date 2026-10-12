@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
-import { del, get, patch, post, type ApiKey, type ScopeSettings } from '../lib/api'
+import { cacheTTLs, del, get, patch, post, type ApiKey, type ScopeSettings } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useRoutableModels } from '../lib/queries'
 import { fmtAgo } from '../lib/format'
@@ -87,6 +87,7 @@ function OrgDefaults() {
   const [name, setName] = useState(org.name)
   const [s, setS] = useState<ScopeSettings>(org.settings ?? {})
   const save = useAction(() => patch(`/api/orgs/${org.id}`, { name, settings: s }), { done: 'Organization saved', onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }) })
+  const purge = useAction(() => del<{ deleted: number }>(`/api/orgs/${org.id}/cache`), { done: (r) => `Cleared ${r.deleted} cached response(s)` })
   return (
     <Panel title="Organization defaults" sub="Apply to every team and project unless they narrow them further." end={<Button variant="primary" busy={save.isPending} onClick={() => save.mutate(undefined)}>Save</Button>}>
       <Field label="Organization name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
@@ -96,6 +97,9 @@ function OrgDefaults() {
         <Field label="Tokens per minute"><Input type="number" min={0} value={s.tpm ?? ''} onChange={(e) => setS({ ...s, tpm: Number(e.target.value) || 0 })} placeholder="No limit" /></Field>
         <Field label="Payload logging"><Select value={s.log_payloads ? 'on' : 'off'} onChange={(e) => setS({ ...s, log_payloads: e.target.value === 'on' })} options={[{ value: 'off', label: 'Off (metadata only)' }, { value: 'on', label: 'On (after redaction)' }]} /></Field>
       </div>
+      <Field label="Response cache" hint={<>Answers identical requests from cache without calling the provider, at no cost. Entries are kept per project and encrypted; clients can opt out with <span className="mono">X-Theophylax-Cache: off</span>. {(s.cache_ttl_seconds ?? 0) > 0 && <Button size="sm" busy={purge.isPending} onClick={() => purge.mutate(undefined)}>Clear cache</Button>}</>}>
+        <Select value={String(Math.max(s.cache_ttl_seconds ?? 0, 0))} onChange={(e) => setS({ ...s, cache_ttl_seconds: Number(e.target.value) })} options={[{ value: '0', label: 'Off' }, ...cacheTTLs]} style={{ maxWidth: 240 }} />
+      </Field>
     </Panel>
   )
 }

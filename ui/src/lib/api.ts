@@ -45,7 +45,10 @@ export type Role = 'owner' | 'admin' | 'member' | 'viewer' | ''
 
 export interface User { id: string; email: string; name: string; is_platform_admin: boolean; status: string; last_login_at?: string; created_at: string }
 export interface Org { id: string; slug: string; name: string; settings: ScopeSettings; created_at: string }
-export interface ScopeSettings { allowed_models?: string[]; log_payloads?: boolean | null; rpm?: number; tpm?: number }
+export interface ScopeSettings { allowed_models?: string[]; log_payloads?: boolean | null; rpm?: number; tpm?: number; cache_ttl_seconds?: number }
+
+// Response cache durations offered in the console (seconds).
+export const cacheTTLs = [{ value: '300', label: '5 minutes' }, { value: '3600', label: '1 hour' }, { value: '86400', label: '24 hours' }, { value: '604800', label: '7 days' }]
 export interface Membership { id: string; user_id: string; org_id: string; scope_type: 'org' | 'team' | 'project'; scope_id: string; role: Role; source: string; scope_name?: string; org_name?: string; email?: string; name?: string }
 export interface Me { user: User; memberships: Membership[]; orgs: Org[]; is_platform_admin: boolean; has_password: boolean }
 export interface Team { id: string; org_id: string; slug: string; name: string; description: string; settings: ScopeSettings; project_count: number; member_count: number; created_at: string }

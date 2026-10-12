@@ -28,6 +28,9 @@ func validSettings(raw *json.RawMessage) error {
 	if err := dec.Decode(&s); err != nil {
 		return badReq("invalid settings: " + err.Error())
 	}
+	if s.CacheTTL < -1 || s.CacheTTL > 7*24*3600 {
+		return badReq("cache_ttl_seconds must be between 1 and 604800, 0 to inherit, or -1 to turn caching off")
+	}
 	return nil
 }
 
@@ -649,4 +652,36 @@ func (a *API) updateUser(c *Ctx) (any, error) {
 	a.Res.Invalidate()
 	c.Audit("user.update", "", "user", u.ID, map[string]any{"status": u.Status, "platform_admin": u.IsPlatformAdmin, "password_reset": in.Password != nil, "idp_id": util.Deref(u.IdpID)})
 	return u, nil
+}
+
+// purgeCache clears the response cache for an organization, or one project
+// with ?project_id=. Org admins (or project admins for their project).
+func (a *API) purgeCache(c *Ctx) (any, error) {
+	o, os, err := a.orgCtx(c, "")
+	if err != nil {
+		return nil, err
+	}
+	pid := c.Query("project_id")
+	if pid == "" {
+		if err := c.Require(os, "admin"); err != nil {
+			return nil, err
+		}
+	} else {
+		s, err := a.scopeOf(c, "project", pid)
+		if err != nil || s.OrgID != o.ID {
+			return nil, badReq("project not found in this organization")
+		}
+		if err := c.Require(s, "admin"); err != nil {
+			return nil, err
+		}
+	}
+	if a.Cache == nil {
+		return map[string]any{"deleted": 0}, nil
+	}
+	n, err := a.Cache.Purge(c, o.ID, pid)
+	if err != nil {
+		return nil, err
+	}
+	c.Audit("cache.purge", o.ID, "org", o.ID, map[string]any{"project_id": pid, "deleted": n})
+	return map[string]any{"deleted": n}, nil
 }

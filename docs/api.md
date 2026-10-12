@@ -5,6 +5,7 @@
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/messages` | Anthropic Messages (streaming, tools, betas) |
+| POST, GET | `/v1/messages/batches`, `/v1/messages/batches/{id}`, `…/{id}/results`, `…/{id}/cancel`; DELETE `…/{id}` | Anthropic Message Batches, run by the gateway on any provider — see [Message batches](#message-batches) |
 | POST | `/v1/messages/count_tokens` | Proxied to Anthropic; estimated elsewhere |
 | POST | `/v1/chat/completions` | OpenAI Chat Completions (streaming, tools) |
 | POST | `/v1/responses` | OpenAI Responses: relayed to OpenAI-format providers, or bridged to Claude (function and custom tools, streaming events). `previous_response_id` needs an OpenAI-format provider |
@@ -58,3 +59,28 @@ Evidence: `/api/orgs/{org}/logs`, `/api/logs/{id}`, `/api/orgs/{org}/usage` (`da
 Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject forced tool use. When `/v1/chat/completions` or `/v1/responses` runs on one of them, `tool_choice: "required"` or a named function is translated to Anthropic's `any`/`tool` as usual and the upstream returns 400; the gateway does not silently downgrade it to `auto`. Clients (for example the Agents SDK with a required tool) should send `auto` for these models (Anthropic recommends `auto` with strict tool use), or be routed to an earlier model.
 
 Errors use the Anthropic envelope `{"type":"error","error":{"type":"…","message":"…"}}` (OpenAI envelope on OpenAI endpoints).
+
+## Message batches
+
+`/v1/messages/batches` implements Anthropic's [Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches), so the Anthropic SDKs' `client.messages.batches` work unchanged against the gateway:
+
+```python
+client = anthropic.Anthropic(base_url="https://ai.example.com", api_key="tpx_…")
+batch = client.messages.batches.create(requests=[
+    {"custom_id": "doc-1", "params": {"model": "claude-sonnet", "max_tokens": 1024, "messages": [...]}},
+])
+# later
+for line in client.messages.batches.results(batch.id):
+    print(line.custom_id, line.result.type)
+```
+
+The gateway runs the batch itself instead of handing it to one vendor's batch service. Each request goes through the same pipeline as a live `/v1/messages` call, so it gets the creator's identity, model access, rate limits and budgets, guardrails, Secret Shield, routing and failover, request logs (endpoint `/v1/messages/batches`), cost accounting and a receipt. Because of that, a batch can use any model the gateway routes to: Bedrock, Vertex, Azure, OpenAI-format or local models as well as Anthropic.
+
+- **It waits for capacity instead of failing.** Rate limits, exhausted budgets and provider overload put a request back in the queue with backoff. Other upstream 5xx errors are retried 3 times. Requests still waiting after 24 hours are marked `expired`, as with Anthropic.
+- **Credentials are checked for every request.** Revoking the key that created a batch, suspending its owner, or removing them from the project stops the requests that have not run yet; they end as `errored`.
+- **Batches belong to a project.** Any key in that project can see the batch, cancel it and read its results.
+- **Data is encrypted at rest.** Request parameters and results are stored encrypted. Parameters are deleted as soon as each request finishes, and results 29 days after the batch ends, or when you delete the batch.
+- **Limits:** 10,000 requests per batch, and at most `THEOPHYLAX_BATCH_MAX_MB` (default 64 MB) per batch. Streaming is not available inside a batch.
+- **Throughput:** each replica runs `THEOPHYLAX_BATCH_WORKERS` requests at once (default 4; `0` turns batch processing off on that replica). Batch requests are counted in `theophylax_batch_requests_total{status}`.
+
+Prices are the normal per-request prices. Batch discounts that providers give on their own batch services are not applied yet; handing batches to those services, where a model's provider offers one, is on the [roadmap](../ROADMAP.md).

@@ -30,11 +30,16 @@ type Config struct {
 	KeyCacheTTL       time.Duration
 	DBMaxConns        int32
 	LogBufferSize     int
-	TrustedProxies    bool
-	RateLimitSync     time.Duration
-	PricingURL        string
-	SMTPURL           string // THEOPHYLAX_SMTP_URL for email alerts
-	PricingRefresh    time.Duration
+	// BatchWorkers is how many message-batch requests this replica runs at
+	// once (0 disables batch processing on it). BatchMaxBytes caps the size
+	// of one batch.
+	BatchWorkers   int
+	BatchMaxBytes  int64
+	TrustedProxies bool
+	RateLimitSync  time.Duration
+	PricingURL     string
+	SMTPURL        string // THEOPHYLAX_SMTP_URL for email alerts
+	PricingRefresh time.Duration
 }
 
 func env(k, def string) string {
@@ -98,6 +103,8 @@ func Load() (*Config, error) {
 		KeyCacheTTL:       envDur("THEOPHYLAX_KEY_CACHE_TTL", 30*time.Second),
 		DBMaxConns:        int32(envInt("THEOPHYLAX_DB_MAX_CONNS", 20)),
 		LogBufferSize:     envInt("THEOPHYLAX_LOG_BUFFER", 20000),
+		BatchWorkers:      envInt("THEOPHYLAX_BATCH_WORKERS", 4),
+		BatchMaxBytes:     int64(envInt("THEOPHYLAX_BATCH_MAX_MB", 64)) << 20,
 		TrustedProxies:    envBool("THEOPHYLAX_TRUST_PROXY_HEADERS", true),
 		// 0 disables fleet-wide sync (limits become per replica).
 		RateLimitSync:  envDur("THEOPHYLAX_RATE_LIMIT_SYNC", 500*time.Millisecond),

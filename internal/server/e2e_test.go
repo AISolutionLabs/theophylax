@@ -52,7 +52,7 @@ func setup(t *testing.T) (*httptest.Server, *Server) {
 	})
 	cfg := &config.Config{Addr: ":0", DatabaseURL: u.String(), MasterKey: bytes.Repeat([]byte{7}, 32), PublicURL: "http://gw.test",
 		BootstrapEmail: "root@example.com", BootstrapPassword: "root-password-123", BootstrapOrg: "Acme", DevMode: true, LocalLogin: true,
-		MaxBodyBytes: 8 << 20, UpstreamTimeout: time.Minute, PricingURL: testPricingURL(), RetentionDays: 0, KeyCacheTTL: time.Second, DBMaxConns: 10, LogBufferSize: 1000}
+		MaxBodyBytes: 8 << 20, UpstreamTimeout: time.Minute, PricingURL: testPricingURL(), RetentionDays: 0, KeyCacheTTL: time.Second, DBMaxConns: 10, LogBufferSize: 1000, BatchWorkers: 4}
 	s, err := New(ctx, cfg, "test")
 	if err != nil {
 		t.Fatal(err)

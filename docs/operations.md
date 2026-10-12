@@ -15,6 +15,8 @@
 | `THEOPHYLAX_STDOUT_REQUEST_LOGS` | `true` | One JSON line per request |
 | `THEOPHYLAX_UPSTREAM_TIMEOUT` | `10m` | Per-provider override in provider options |
 | `THEOPHYLAX_MAX_BODY_MB` | `32` | Request size limit |
+| `THEOPHYLAX_BATCH_WORKERS` | `4` | [Message batch](api.md#message-batches) requests this replica runs at once; `0` disables batch processing on it |
+| `THEOPHYLAX_BATCH_MAX_MB` | `64` | Size limit for one message batch |
 | `THEOPHYLAX_KEY_CACHE_TTL` | `30s` | Revocation propagation across replicas |
 | `THEOPHYLAX_DB_MAX_CONNS` | `20` | Pool size per replica |
 | `THEOPHYLAX_RECEIPT_SEED` | derived | Explicit Ed25519 seed (base64) |

@@ -65,7 +65,10 @@ func BearerToken(req *http.Request) string {
 }
 
 func (r *Resolver) lookupKey(ctx context.Context, token string) keyCacheEntry {
-	h := string(HashKey(token))
+	return r.lookupHash(ctx, string(HashKey(token)))
+}
+
+func (r *Resolver) lookupHash(ctx context.Context, h string) keyCacheEntry {
 	r.mu.RLock()
 	e, ok := r.cache[h]
 	r.mu.RUnlock()
@@ -100,7 +103,17 @@ func (r *Resolver) lookupKey(ctx context.Context, token string) keyCacheEntry {
 
 // FromKey authenticates an API key of the given kind ("gateway" or "pat").
 func (r *Resolver) FromKey(ctx context.Context, token, kind string) (*Principal, error) {
-	e := r.lookupKey(ctx, token)
+	return r.fromEntry(r.lookupKey(ctx, token), kind)
+}
+
+// FromKeyHash authenticates a stored key by its hash, applying the same
+// revocation, expiry and owner checks as FromKey. Work done later on a key's
+// behalf (message batches) uses it so that revoking the key stops the work.
+func (r *Resolver) FromKeyHash(ctx context.Context, hash []byte, kind string) (*Principal, error) {
+	return r.fromEntry(r.lookupHash(ctx, string(hash)), kind)
+}
+
+func (r *Resolver) fromEntry(e keyCacheEntry, kind string) (*Principal, error) {
 	if e.err != nil {
 		return nil, e.err
 	}

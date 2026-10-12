@@ -35,6 +35,7 @@ There is **no paid edition**: everything here is Apache 2.0, including the featu
 - **Agents** — managed agents (model + system prompt + approved skills + MCP servers + defaults) behind `/v1/agents/{slug}/messages`, with optional keys bound to a single agent.
 - **Skill registry & marketplace** — publish skills (SKILL.md), MCP servers (credentials encrypted), agent templates and prompts with immutable, content-addressed versions; review workflow; install per org/team/project, following the approved version or pinned to one for staged rollouts and rollbacks; ratings; Claude Code sync for skills (`/v1/skills`) and MCP servers (`/v1/mcp/servers`, as `.mcp.json`); managed agents use Anthropic's MCP connector on the Claude API and Microsoft Foundry.
 - **Observability & audit** — async batched request logs (COPY), optional post-redaction payload capture, usage and chargeback by model/team/project/key/person/provider/agent or any request tag (`X-Theophylax-Tags: feature=search`), Prometheus metrics, **OpenTelemetry traces** (GenAI semantic conventions, client `traceparent` honoured) to Tempo, Langfuse, Datadog or Honeycomb, request and audit **log streaming** to Splunk HEC, Elastic or any HTTP endpoint, JSON stdout logs, and a tamper-evident hash-chained audit trail with one-click verification.
+- **Configuration as code** — `theophylax config export | plan | apply` keeps organizations, teams, projects, providers, models, guardrails and budgets in a reviewable YAML file, applied through the admin API with a personal access token (so permissions and the audit log apply). Secrets are never exported; `${env:…}` references round-trip. See [docs/config-as-code.md](docs/config-as-code.md).
 - **Migrating from LiteLLM** — `theophylax import-litellm` reads your `config.yaml` and LiteLLM database (teams, users, keys, budgets, and DB-stored models, decrypted with your salt key). Existing `sk-…` keys keep working unchanged.
 - **Console** — a modern web UI for developers and admins: playground with streaming, keys with copy-paste quick-starts, receipts, rollouts, marketplace, guardrail builder, ⌘K command palette, light and dark themes.
 
@@ -113,6 +114,7 @@ Providers, models and routing come from `model_list`; organizations, teams, memb
 - [Model rollouts](docs/rollouts.md)
 - [Identity: SSO, SCIM & RBAC](docs/identity.md)
 - [Configuration & operations](docs/operations.md)
+- [Configuration as code](docs/config-as-code.md)
 - [API reference](docs/api.md)
 - [Benchmarks vs LiteLLM and Portkey](bench/README.md)
 

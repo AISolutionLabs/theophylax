@@ -82,6 +82,7 @@ func (a *API) createOrg(c *Ctx) (any, error) {
 		return nil, err
 	}
 	c.Audit("org.create", o.ID, "org", o.ID, o)
+	a.Res.Invalidate() // the creator's new owner membership must apply to cached tokens
 	a.changed(c)
 	return created{o}, nil
 }

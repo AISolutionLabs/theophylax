@@ -415,3 +415,7 @@ func (f *flow) token(stops string) (any, error) {
 	f.i = j
 	return parseScalar(tok)
 }
+
+// ParseYAML parses the block-style YAML subset described on parseYAML into
+// map[string]any / []any / scalar values (numbers are float64).
+func ParseYAML(src string) (any, error) { return parseYAML(src) }

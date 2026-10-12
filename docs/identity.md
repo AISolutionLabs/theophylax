@@ -33,4 +33,4 @@ Generate a SCIM token on the identity provider and point Entra ID / Okta provisi
 
 ## Personal access tokens
 
-`tpxp_…` tokens act with the creating user's permissions on the admin API (`Authorization: Bearer`), expire after 90 days by default and are auditable like any other actor — use them for Terraform/Crossplane/GitOps automation.
+`tpxp_…` tokens act with the creating user's permissions on the admin API (`Authorization: Bearer`), expire after 90 days by default and are auditable like any other actor — use them for automation such as [`theophylax config`](config-as-code.md) in a GitOps pipeline.

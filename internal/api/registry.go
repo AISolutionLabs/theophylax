@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -126,6 +127,18 @@ func (a *API) normaliseContent(kind string, raw json.RawMessage) (json.RawMessag
 		cmd, _ := c["command"].(string)
 		if u == "" && cmd == "" {
 			return nil, badReq("mcp_server content requires url (remote) or command (stdio)")
+		}
+		if tp, ok := c["tool_policy"]; ok {
+			b, _ := json.Marshal(tp)
+			var pol struct {
+				Allow []string `json:"allow"`
+				Deny  []string `json:"deny"`
+			}
+			dec := json.NewDecoder(bytes.NewReader(b))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&pol); err != nil {
+				return nil, badReq("tool_policy must be {\"allow\": [tool names], \"deny\": [tool names]}; a trailing * matches a prefix")
+			}
 		}
 		if tok, _ := c["authorization_token"].(string); tok != "" {
 			c["authorization_token_enc"] = base64.StdEncoding.EncodeToString(a.Box.SealString(tok))

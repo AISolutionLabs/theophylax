@@ -502,9 +502,10 @@ func (a *API) installedItems(c *Ctx, p *auth.Principal, kind, itemID string) ([]
 
 // clientMCPServers lists the approved MCP servers installed for the caller's
 // scope, at the version that applies to it, plus the same servers as an
-// .mcp.json document for Claude Code. Stored authorization tokens stay in the
-// gateway (they are only injected for managed agents); servers that have one
-// are marked requires_authorization.
+// .mcp.json document for Claude Code. Remote (Streamable HTTP) servers point
+// at the gateway's MCP proxy (/mcp/{slug}), which authenticates the caller's
+// gateway key and injects the stored token, so tokens never leave the
+// gateway. Legacy SSE servers are listed with their own URL.
 func (a *API) clientMCPServers(c *Ctx) (any, error) {
 	p, err := a.Res.FromKey(c, auth.BearerToken(c.R), "gateway")
 	if err != nil {
@@ -531,11 +532,15 @@ func (a *API) clientMCPServers(c *Ctx) (any, error) {
 		_ = json.Unmarshal(raw, &content)
 		entry := map[string]any{}
 		switch {
+		case content.URL != "" && content.Transport == "sse":
+			entry["type"], entry["url"] = "sse", content.URL
 		case content.URL != "":
-			if content.Transport != "sse" {
-				content.Transport = "http"
-			}
-			entry["type"], entry["url"] = content.Transport, content.URL
+			// Remote servers are reached through the gateway's MCP proxy:
+			// the caller's own key authenticates, the stored token is
+			// injected, and tool policy, guardrails and logging apply.
+			content.Transport = "http"
+			entry["type"], entry["url"] = "http", gateway.MCPServerURL(a.Cfg.PublicURL, it.Slug)
+			entry["headers"] = map[string]any{"Authorization": "Bearer ${THEOPHYLAX_API_KEY}"}
 		case content.Command != "":
 			content.Transport = "stdio"
 			cmd, args := content.Command, content.Args
@@ -552,8 +557,14 @@ func (a *API) clientMCPServers(c *Ctx) (any, error) {
 		item := map[string]any{"id": it.ID, "slug": it.Slug, "name": it.Name, "description": it.Description, "version": it.EffectiveVersion,
 			"transport": content.Transport, "requires_authorization": content.HasToken}
 		for k, v := range entry {
-			if k != "type" {
+			if k != "type" && k != "headers" {
 				item[k] = v
+			}
+		}
+		if content.URL != "" {
+			item["upstream_url"] = content.URL
+			if content.Transport == "http" {
+				item["gateway_url"] = entry["url"]
 			}
 		}
 		out = append(out, item)

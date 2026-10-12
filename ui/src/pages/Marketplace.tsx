@@ -100,7 +100,7 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
             <div className="stack">
               <p>{item.description}</p>
               {item.kind === 'skill' && c.skill_md && <div className="panel" style={{ padding: 18 }}><Markdown text={c.skill_md} /></div>}
-              {item.kind === 'mcp_server' && <dl className="kv"><dt>Transport</dt><dd>{c.transport ?? (c.url ? 'http' : 'stdio')}</dd><dt>{c.url ? 'URL' : 'Command'}</dt><dd className="mono">{c.url ?? `${c.command} ${(c.args ?? []).join(' ')}`}</dd><dt>Credentials</dt><dd>{c.has_authorization_token ? 'Stored encrypted, injected by the gateway' : 'None'}</dd></dl>}
+              {item.kind === 'mcp_server' && <dl className="kv"><dt>Transport</dt><dd>{c.transport ?? (c.url ? 'http' : 'stdio')}</dd><dt>{c.url ? 'URL' : 'Command'}</dt><dd className="mono">{c.url ?? `${c.command} ${(c.args ?? []).join(' ')}`}</dd><dt>Credentials</dt><dd>{c.has_authorization_token ? 'Stored encrypted, injected by the gateway' : 'None'}</dd>{c.url && (c.transport ?? 'http') === 'http' && <><dt>Through the gateway</dt><dd className="mono">{base}/mcp/{item.slug}</dd></>}{c.tool_policy?.allow?.length > 0 && <><dt>Allowed tools</dt><dd className="mono">{c.tool_policy.allow.join(', ')}</dd></>}{c.tool_policy?.deny?.length > 0 && <><dt>Denied tools</dt><dd className="mono">{c.tool_policy.deny.join(', ')}</dd></>}</dl>}
               {item.kind === 'agent' && <dl className="kv"><dt>Model</dt><dd className="mono">{c.model}</dd><dt>System prompt</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{c.system_prompt}</dd></dl>}
               {item.kind === 'prompt' && <div className="code-block" style={{ whiteSpace: 'pre-wrap' }}>{c.template}</div>}
               <div className="row"><span className="muted">Your rating</span>{[1, 2, 3, 4, 5].map((n) => <button key={n} className="btn ghost icon sm" onClick={() => rate.mutate(n)} aria-label={`Rate ${n}`} style={{ color: (d.data?.my_rating ?? 0) >= n ? 'var(--bronze)' : 'var(--muted)' }}><Star size={16} fill={(d.data?.my_rating ?? 0) >= n ? 'currentColor' : 'none'} /></button>)}</div>
@@ -127,7 +127,7 @@ export function ItemDrawer({ item, onClose }: { item: RegistryItem; onClose: () 
               {item.kind === 'mcp_server' && (
                 <>
                   <h3>Sync into Claude Code</h3>
-                  <p className="muted">Writes the MCP servers installed for a developer's project, team and org into a project's <code>.mcp.json</code>. Stored tokens stay in the gateway; servers that need one are marked <code>requires_authorization</code>.</p>
+                  <p className="muted">Writes the MCP servers installed for a developer's project, team and org into a project's <code>.mcp.json</code>. Remote servers are reached through the gateway at <code>/mcp/&lt;slug&gt;</code> with the developer's own key (read from <code>THEOPHYLAX_API_KEY</code>); stored tokens stay in the gateway, and tool policy, guardrails and logging apply to every call.</p>
                   <CodeBlock code={`curl -s -H "x-api-key: $ANTHROPIC_AUTH_TOKEN" ${base}/v1/mcp/servers | jq '.mcp_json' > .mcp.json`} />
                 </>
               )}

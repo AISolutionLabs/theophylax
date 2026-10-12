@@ -161,7 +161,7 @@ func TestMCPServersSyncAndAgent(t *testing.T) {
 		t.Fatalf("want 2 installed servers, got %d: %s", n, raw)
 	}
 	cfg := body["mcp_json"].(map[string]any)["mcpServers"].(map[string]any)
-	if got := cfg["jira"]; !reflect.DeepEqual(got, map[string]any{"type": "http", "url": "https://mcp.example/jira/v1"}) {
+	if got := cfg["jira"]; !reflect.DeepEqual(got, map[string]any{"type": "http", "url": "http://gw.test/mcp/jira", "headers": map[string]any{"Authorization": "Bearer ${THEOPHYLAX_API_KEY}"}}) {
 		t.Fatalf("jira should be served at its pinned version: %v", got)
 	}
 	if got := cfg["files"]; !reflect.DeepEqual(got, map[string]any{"type": "stdio", "command": "npx", "args": []any{"-y", "@acme/files-mcp"}}) {
@@ -171,6 +171,9 @@ func TestMCPServersSyncAndAgent(t *testing.T) {
 		d := d.(map[string]any)
 		if d["requires_authorization"] != (d["slug"] == "jira") {
 			t.Fatalf("requires_authorization: %v", d)
+		}
+		if d["slug"] == "jira" && (d["upstream_url"] != "https://mcp.example/jira/v1" || d["gateway_url"] != "http://gw.test/mcp/jira") {
+			t.Fatalf("jira should be served at its pinned version through the gateway: %v", d)
 		}
 	}
 

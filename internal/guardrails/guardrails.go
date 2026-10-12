@@ -261,6 +261,14 @@ func RequestTexts(body map[string]any, openai bool) []TextRef {
 
 // addDeep registers every string inside a JSON value (tool inputs echo file
 // contents and commands, which often carry secrets).
+// DeepTexts enumerates every string inside a JSON value (for example MCP
+// tool arguments or results), so policies can inspect and redact them.
+func DeepTexts(v any, role string) []TextRef {
+	var refs []TextRef
+	addDeep(v, role, true, &refs)
+	return refs
+}
+
 func addDeep(v any, role string, latest bool, refs *[]TextRef) {
 	switch x := v.(type) {
 	case map[string]any:

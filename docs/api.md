@@ -16,7 +16,8 @@
 | GET | `/v1/models` | Models visible to the caller (Anthropic shape when `anthropic-version` is sent) |
 | GET | `/v1/whoami` | Caller context |
 | GET | `/v1/skills`, `/v1/skills/{id}/download` | Skills installed for the key's scope |
-| GET | `/v1/mcp/servers` | MCP servers installed for the key's scope, with an `.mcp.json` document (`mcp_json`); stored tokens are never returned |
+| GET | `/v1/mcp/servers` | MCP servers installed for the key's scope, with an `.mcp.json` document (`mcp_json`) that points remote servers at the gateway; stored tokens are never returned |
+| POST, GET, DELETE | `/mcp/{slug}` | [MCP gateway](#mcp-gateway): Streamable HTTP proxy to an installed MCP server |
 | GET | `/v1/receipts/{request_id}` | Receipt + verification + anchoring |
 | POST | `/v1/receipts/verify` | Public verification helper |
 | GET | `/.well-known/theophylax-receipt-keys.json` | Receipt public keys |
@@ -58,3 +59,25 @@ Evidence: `/api/orgs/{org}/logs`, `/api/logs/{id}`, `/api/orgs/{org}/usage` (`da
 Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject forced tool use. When `/v1/chat/completions` or `/v1/responses` runs on one of them, `tool_choice: "required"` or a named function is translated to Anthropic's `any`/`tool` as usual and the upstream returns 400; the gateway does not silently downgrade it to `auto`. Clients (for example the Agents SDK with a required tool) should send `auto` for these models (Anthropic recommends `auto` with strict tool use), or be routed to an earlier model.
 
 Errors use the Anthropic envelope `{"type":"error","error":{"type":"…","message":"…"}}` (OpenAI envelope on OpenAI endpoints).
+
+## MCP gateway
+
+`/mcp/{slug}` proxies a remote MCP server from the [registry](../README.md) (Streamable HTTP transport), so tool traffic gets the same controls as model traffic. Clients connect with their own gateway key. The `.mcp.json` from `/v1/mcp/servers` is already set up this way:
+
+```json
+{"mcpServers": {"jira": {"type": "http", "url": "https://ai.example.com/mcp/jira",
+  "headers": {"Authorization": "Bearer ${THEOPHYLAX_API_KEY}"}}}}
+```
+
+For every request the gateway:
+
+- **Checks installation.** It serves the server only if it is installed for the caller's org, team or project, at the version that applies there (a pinned version or the approved one).
+- **Injects the credential.** It adds the server's stored token, which is encrypted at rest. People never hold upstream credentials, and the server never sees their gateway key. If the server rejects the stored token, the caller gets a 502 rather than an auth challenge.
+- **Enforces the tool policy.** A server version's content may set `"tool_policy": {"allow": [...], "deny": [...]}`; a trailing `*` matches a prefix. Denied tools are removed from `tools/list`, and calls to them are refused before they reach the server. The policy is part of the reviewed, versioned server definition.
+- **Applies guardrails to arguments and results.**
+  - The caller's guardrail policies run over `tools/call` arguments before the tool sees them, so keyword, PII and Secret Shield rules can block or redact what goes to a third-party tool.
+  - Tool results are evaluated as untrusted content before the model sees them. A result that prompt-injection detection or another blocking rule flags is replaced with an `isError` result saying the gateway withheld it.
+- **Logs and signs.** Each exchange is logged under endpoint `/mcp/{slug}`, with the JSON-RPC method or `tools/call <tool>` as the upstream model and any guardrail findings (phase `tool_result` for results). Each one gets a signed [receipt](receipts.md) of the exact request and response bytes.
+- **Binds sessions to the caller.** The server's `Mcp-Session-Id` is returned signed for this caller and project. Presenting it with another key, or altering it, returns 404, and MCP clients then start a new session.
+
+Local (stdio) servers run on the developer's machine and cannot be proxied. Servers using the legacy HTTP+SSE transport are listed with their own URL.

@@ -91,7 +91,22 @@ function ContentEditor({ kind, value, onChange }: { kind: string; value: any; on
               ? <Field label="Command"><Input className="code" value={value.command ?? ''} onChange={(e) => set('command')(e.target.value)} placeholder="npx -y @org/mcp-server" /></Field>
               : <Field label="URL"><Input className="code" value={value.url ?? ''} onChange={(e) => set('url')(e.target.value)} placeholder="https://mcp.internal/jira" /></Field>}
           </div>
-          {(value.transport ?? 'http') !== 'stdio' && <Field label="Authorization token (optional)" hint="Encrypted at rest. Injected by the gateway for agents; never shown to users."><Input type="password" value={value.authorization_token ?? ''} onChange={(e) => set('authorization_token')(e.target.value)} autoComplete="off" /></Field>}
+          {(value.transport ?? 'http') !== 'stdio' && <Field label="Authorization token (optional)" hint="Encrypted at rest. Injected by the gateway's MCP proxy and for agents; never shown to users."><Input type="password" value={value.authorization_token ?? ''} onChange={(e) => set('authorization_token')(e.target.value)} autoComplete="off" /></Field>}
+          {(value.transport ?? 'http') === 'http' && (
+            <div className="grid2">
+              {(['allow', 'deny'] as const).map((k) => (
+                <Field key={k} label={k === 'allow' ? 'Allowed tools (optional)' : 'Denied tools (optional)'} hint={k === 'allow' ? 'Comma-separated. When set, only these tools are offered. A trailing * matches a prefix.' : 'Comma-separated, e.g. delete_*, admin_reset. Hidden from tools/list and refused on call.'}>
+                  <Input className="code" value={(value.tool_policy?.[k] ?? []).join(', ')}
+                    onChange={(e) => {
+                      const list = e.target.value.split(',').map((x: string) => x.trim()).filter(Boolean)
+                      const tp = { ...(value.tool_policy ?? {}), [k]: list }
+                      if (!list.length) delete tp[k]
+                      set('tool_policy')(Object.keys(tp).length ? tp : undefined)
+                    }} />
+                </Field>
+              ))}
+            </div>
+          )}
         </>
       )
     case 'agent':

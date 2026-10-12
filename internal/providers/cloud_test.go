@@ -200,3 +200,42 @@ func TestOpenAIEmbedPassthrough(t *testing.T) {
 		t.Fatalf("%v %+v", err, res)
 	}
 }
+
+// Haiku 5.5 is served on bedrock-runtime only through cross-region profiles, so
+// its bare foundation-model ID must not be offered for discovery or model watch.
+func TestBedrockDiscoverySkipsProfileOnlyModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/foundation-models":
+			_, _ = w.Write([]byte(`{"modelSummaries":[
+				{"modelId":"anthropic.claude-haiku-5-5","modelName":"Claude Haiku 5.5","inferenceTypesSupported":["INFERENCE_PROFILE"]},
+				{"modelId":"anthropic.claude-3-haiku-20240307-v1:0","modelName":"Claude 3 Haiku","inferenceTypesSupported":["ON_DEMAND","PROVISIONED"]},
+				{"modelId":"anthropic.claude-legacy","modelName":"No inference types reported"}]}`))
+		case "/inference-profiles":
+			_, _ = w.Write([]byte(`{"inferenceProfileSummaries":[
+				{"inferenceProfileId":"global.anthropic.claude-haiku-5-5","inferenceProfileName":"Global Claude Haiku 5.5"},
+				{"inferenceProfileId":"us.meta.llama4","inferenceProfileName":"Llama"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	p, err := New("bedrock://us-east-1?auth=api_key&api_key=k&control_endpoint="+url.QueryEscape(srv.URL), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms, err := p.(interface {
+		ListModels(context.Context) ([]DiscoveredModel, error)
+	}).ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range ms {
+		got = append(got, m.Kind+":"+m.ID)
+	}
+	want := []string{"foundation:anthropic.claude-3-haiku-20240307-v1:0", "foundation:anthropic.claude-legacy", "inference_profile:global.anthropic.claude-haiku-5-5"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("discovered %v, want %v", got, want)
+	}
+}

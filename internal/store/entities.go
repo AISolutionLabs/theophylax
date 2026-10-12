@@ -164,6 +164,19 @@ type GuardrailPolicy struct {
 	UpdatedAt   time.Time       `db:"updated_at" json:"updated_at"`
 }
 
+// NotificationChannel is where an organization's alerts are delivered.
+type NotificationChannel struct {
+	ID        string    `db:"id" json:"id"`
+	OrgID     string    `db:"org_id" json:"org_id"`
+	Name      string    `db:"name" json:"name"`
+	Type      string    `db:"type" json:"type"` // slack | teams | webhook | email
+	TargetEnc []byte    `db:"target_enc" json:"-"`
+	SecretEnc []byte    `db:"secret_enc" json:"-"`
+	Events    []string  `db:"events" json:"events"`
+	Enabled   bool      `db:"enabled" json:"enabled"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type Budget struct {
 	ID          string   `db:"id" json:"id"`
 	OrgID       string   `db:"org_id" json:"org_id"`

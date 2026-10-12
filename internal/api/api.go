@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"theophylax/internal/alerts"
 	"theophylax/internal/audit"
 	"theophylax/internal/auth"
 	"theophylax/internal/config"
@@ -40,6 +41,7 @@ type API struct {
 	RateLimitsGlobal bool
 	Watch            *modelwatch.Watcher
 	Pricing          *pricing.Catalog
+	Alerts           *alerts.Alerter
 }
 
 type Ctx struct {
@@ -246,6 +248,11 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/orgs/{org}/budgets", h(a.createBudget))
 	mux.HandleFunc("PATCH /api/budgets/{id}", h(a.updateBudget))
 	mux.HandleFunc("DELETE /api/budgets/{id}", h(a.deleteBudget))
+	mux.HandleFunc("GET /api/orgs/{org}/notifications", h(a.listChannels))
+	mux.HandleFunc("POST /api/orgs/{org}/notifications", h(a.createChannel))
+	mux.HandleFunc("PATCH /api/notifications/{id}", h(a.updateChannel))
+	mux.HandleFunc("DELETE /api/notifications/{id}", h(a.deleteChannel))
+	mux.HandleFunc("POST /api/notifications/{id}/test", h(a.testChannel))
 
 	// Identity providers
 	mux.HandleFunc("GET /api/orgs/{org}/idps", h(a.listIdPs))

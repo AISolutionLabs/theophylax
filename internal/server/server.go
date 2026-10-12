@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"theophylax/internal/alerts"
 	"theophylax/internal/api"
 	"theophylax/internal/audit"
 	"theophylax/internal/auth"
@@ -107,7 +108,16 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp, Pricing: prices}
 	guard.Judge = gw.Judge
 	api.Version = version
-	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global(), Pricing: prices}
+	smtpCfg, err := alerts.ParseSMTPURL(cfg.SMTPURL)
+	if err != nil {
+		return nil, err
+	}
+	// Alert channels are admin-configured URLs, so they go through the SSRF guard
+	// (loopback allowed only in dev mode).
+	alerter := &alerts.Alerter{St: st, Box: box, Loader: loader, Budgets: budgets, PublicURL: cfg.PublicURL,
+		Deliver: &alerts.Deliverer{HTTP: util.SafeHTTPClient(15*time.Second, cfg.DevMode), SMTP: smtpCfg}}
+	gw.OnBlock = alerter.GuardrailBlocked
+	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global(), Pricing: prices, Alerts: alerter}
 	watch := modelwatch.New(st, prices, func() map[string]providers.Provider {
 		out := map[string]providers.Provider{}
 		for id, e := range loader.Snapshot().Providers {
@@ -133,6 +143,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	bg, cancel := context.WithCancel(context.Background())
 	go loader.Run(bg, pool)
 	go budgets.Run(bg)
+	go alerter.Run(bg)
 	go prices.Run(bg)
 	go logs.Run(bg)
 	go gw.RL.Run(bg)

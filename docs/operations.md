@@ -21,6 +21,7 @@
 | `THEOPHYLAX_RECEIPT_CHECKPOINT_INTERVAL` | `2m` | Merkle anchoring interval |
 | `THEOPHYLAX_TRUST_PROXY_HEADERS` | `true` | Use `X-Forwarded-For` for client IPs |
 | `THEOPHYLAX_PRICING_URL` | LiteLLM catalog on GitHub | Upstream price catalog (`https://…`, `file:///path` for an air-gapped mirror, or `off` to use only the stored copy) |
+| `THEOPHYLAX_SMTP_URL` | — | SMTP server for email alerts: `smtp://user:pass@host:587?from=alerts@example.com` (STARTTLS) or `smtps://…:465` (implicit TLS). Unset disables email channels |
 | `THEOPHYLAX_PRICING_REFRESH` | `6h` | How often the price catalog is re-fetched |
 | `THEOPHYLAX_RATE_LIMIT_SYNC` | `500ms` | How often replicas share RPM/TPM counts through Postgres; `0` makes limits per replica |
 | `THEOPHYLAX_MODEL_WATCH_INTERVAL` | `6h` | How often connected providers are checked for new models; `0` disables |
@@ -97,6 +98,22 @@ It needs `THEOPHYLAX_DATABASE_URL` (already set inside the gateway's container).
 Spend, dollar budgets, receipts and the **Billing** page use the upstream providers' published list prices, never admin-entered values. At startup and every `THEOPHYLAX_PRICING_REFRESH`, the gateway fetches a machine-readable catalog ([LiteLLM's `model_prices_and_context_window.json`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) by default) and stores it in Postgres. Replicas without internet egress, and restarts, use the stored copy. If a refresh fails, the previous prices stay in use and the error appears under Billing → Price source. Platform admins can force a refresh there or with `POST /api/pricing/refresh`.
 
 Each request is priced when it completes, using the provider kind and upstream model ID of the deployment that served it (after failover). Each token type is billed at its own catalog rate, and long-context tiers apply when the prompt crosses their threshold. The matched catalog entry is recorded on the request log as `price_key`. Requests whose model is not in the catalog are recorded at $0 with an empty `price_key`, and Billing lists them as unpriced. Costs already recorded are not recalculated when prices change later.
+
+## Alerts
+
+Org admins add alert channels under **Settings → Alerts** (or `POST /api/orgs/{org}/notifications`): Slack incoming webhooks, Microsoft Teams workflow webhooks, generic webhooks and email. Each channel receives every alert, or only the types it subscribes to:
+
+| Event | When |
+|---|---|
+| `budget.threshold` | A budget passes its alert threshold (`alert_pct`, default 80%) — once per budget per period |
+| `budget.exhausted` | A budget reaches 100% — once per budget per period; the message says whether requests are now blocked |
+| `guardrail.blocked` | A guardrail policy blocked requests — one summary per policy per 5-minute window, with the count and the latest rule and detail |
+
+Alerts are evaluated every 30 seconds on every replica and claimed in the database before sending, so each is delivered once across the fleet. They never include prompt or response content. Per-person default budgets are not alerted on yet, because they have no single figure to compare.
+
+Channel URLs are stored encrypted, shown only as their host, and fetched through the same SSRF guard as other admin-configured URLs. **Send test** (`POST /api/notifications/{id}/test`) checks delivery.
+
+Generic webhooks receive the event as JSON (`event`, `org_id`, `title`, `text`, `link`, `fields`, `ts`) with an `X-Theophylax-Event` header. With a signing secret, each request also carries `X-Theophylax-Timestamp` and `X-Theophylax-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">`; verify the signature and reject old timestamps to prevent replays.
 
 ## Budgets
 

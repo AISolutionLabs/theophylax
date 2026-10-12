@@ -433,7 +433,20 @@ func (pl *planner) models() {
 		return
 	}
 	seen := map[string]bool{}
-	for _, dm := range pl.d.Models {
+	// Routers refer to other models by name, so they are created and
+	// changed after every other model.
+	ordered := slices.Clone(pl.d.Models)
+	slices.SortStableFunc(ordered, func(a, b Model) int {
+		ra, rb := a.Strategy == "complexity", b.Strategy == "complexity"
+		switch {
+		case ra == rb:
+			return 0
+		case ra:
+			return 1
+		}
+		return -1
+	})
+	for _, dm := range ordered {
 		if dm.Name == "" {
 			pl.fail("a model has no name")
 			continue
@@ -465,6 +478,13 @@ func (pl *planner) models() {
 		set("capabilities", dm.Capabilities, dm.Capabilities != nil && !slices.Equal(dm.Capabilities, cur.Capabilities))
 		set("status", dm.Status, dm.Status != "" && dm.Status != cur.Status)
 		set("strategy", dm.Strategy, dm.Strategy != "" && dm.Strategy != cur.Strategy)
+		// A router's tiers travel with its strategy, so both change in one call.
+		if dm.Routing != nil && (!jsonEq(dm.Routing, cur.Routing) || fields["strategy"] != nil) {
+			set("routing", dm.Routing, true)
+			if fields["strategy"] == nil && cur.Strategy != "" {
+				fields["strategy"] = cur.Strategy
+			}
+		}
 		if lm == nil {
 			pl.planned[key] = true
 			fields["name"] = dm.Name

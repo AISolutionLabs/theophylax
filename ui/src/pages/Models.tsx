@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Network, Plus, Trash2 } from 'lucide-react'
-import { del, patch, post, type Deployment, type Model, type Provider } from '../lib/api'
+import { del, patch, post, type ComplexityRouting, type Deployment, type Model, type Provider } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useModels, useProviders } from '../lib/queries'
 import { fmtCompact, fmtRate, kindLabel } from '../lib/format'
@@ -46,7 +46,7 @@ export default function Models() {
               {list.map((m) => (
                 <tr key={m.id} className="click" onClick={() => setOpen(m)}>
                   <td><div className="cell-title mono">{m.name}</div><div className="cell-sub">{m.display_name}{m.aliases.length ? ` · aliases: ${m.aliases.join(', ')}` : ''}</div></td>
-                  <td>{m.deployments.length ? m.deployments.map((d) => <div key={d.id} className="cell-sub" style={{ color: 'var(--ink-2)' }}>{d.provider_name} <span className="dim">p{d.priority}{d.enabled ? '' : ' · off'}</span></div>) : <span className="dim">No deployments</span>}</td>
+                  <td>{m.strategy === 'complexity' && m.routing ? m.routing.tiers.map((t, i) => <div key={i} className="cell-sub" style={{ color: 'var(--ink-2)' }}><span className="dim">{t.max_score != null ? `≤ ${t.max_score}` : 'harder'}</span> → <span className="mono">{t.model}</span></div>) : m.deployments.length ? m.deployments.map((d) => <div key={d.id} className="cell-sub" style={{ color: 'var(--ink-2)' }}>{d.provider_name} <span className="dim">p{d.priority}{d.enabled ? '' : ' · off'}</span></div>) : <span className="dim">No deployments</span>}</td>
                   <td className="dim">{m.strategy}</td>
                   <td className="num"><PriceCell m={m} /></td>
                   <td className="num dim">{m.context_window ? fmtCompact(m.context_window) : '—'}</td>
@@ -93,9 +93,10 @@ function ModelDrawer({ model, onClose }: { model?: Model; onClose: () => void })
       {model && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'routing', label: `Routing (${live?.deployments.length ?? 0})` }, { value: 'details', label: 'Details' }]} />}
       {tab === 'routing' && live && (
         <div className="stack">
-          <Field label="Routing strategy" hint="Priority tries lower numbers first and fails over on errors; weighted spreads load; latency prefers the fastest healthy deployment.">
-            <Select value={f.strategy} disabled={!isPlatformAdmin} onChange={(e) => { set('strategy')(e.target.value); patch(`/api/models/${model!.id}`, { strategy: e.target.value }) }} options={[{ value: 'priority', label: 'Priority with failover' }, { value: 'weighted', label: 'Weighted load balancing' }, { value: 'latency', label: 'Lowest latency' }]} />
+          <Field label="Routing strategy" hint="Priority tries lower numbers first and fails over on errors; weighted spreads load; latency prefers the fastest healthy deployment; complexity makes this model a router that sends each request to a smaller or stronger model depending on how demanding it is.">
+            <Select value={f.strategy} disabled={!isPlatformAdmin} onChange={(e) => { set('strategy')(e.target.value); if (e.target.value !== 'complexity') patch(`/api/models/${model!.id}`, { strategy: e.target.value, routing: null }) }} options={[{ value: 'priority', label: 'Priority with failover' }, { value: 'weighted', label: 'Weighted load balancing' }, { value: 'latency', label: 'Lowest latency' }, { value: 'complexity', label: 'Complexity router' }]} />
           </Field>
+          {f.strategy === 'complexity' ? <ComplexityEditor model={live} disabled={!isPlatformAdmin} /> : <>
           <table className="tbl panel">
             <thead><tr><th>Provider</th><th>Upstream model</th><th className="num" title="Upstream list price, USD per million tokens: input / output · cache read / cache write">List price per 1M</th><th className="num">Priority</th><th className="num">Weight</th><th>On</th><th /></tr></thead>
             <tbody>
@@ -125,6 +126,7 @@ function ModelDrawer({ model, onClose }: { model?: Model; onClose: () => void })
               <Button variant="primary" disabled={!dep.provider_id || !dep.upstream_model} busy={addDep.isPending} onClick={() => addDep.mutate(undefined)}>Add deployment</Button>
             </div>
           )}
+          </>}
         </div>
       )}
       {tab === 'details' && (
@@ -147,6 +149,43 @@ function ModelDrawer({ model, onClose }: { model?: Model; onClose: () => void })
       )}
       <Confirm open={confirm} danger title={`Remove ${model?.name}?`} body="Clients requesting this model will get a 404." confirmLabel="Remove model" onClose={() => setConfirm(false)} onConfirm={() => remove.mutate(undefined)} busy={remove.isPending} />
     </Drawer>
+  )
+}
+
+const defaultTiers = (): ComplexityRouting['tiers'] => [{ max_score: 0.2, model: '' }, { max_score: 0.5, model: '' }, { model: '' }]
+
+function ComplexityEditor({ model, disabled }: { model: Model; disabled: boolean }) {
+  const all = useModels().data ?? []
+  const targets = all.filter((m) => m.id !== model.id && m.strategy !== 'complexity' && !m.name.includes('*'))
+  const [r, setR] = useState<ComplexityRouting>(model.routing?.tiers?.length ? model.routing : { tiers: defaultTiers(), classifier: 'heuristic' })
+  const setTier = (i: number, k: 'model' | 'max_score', v: any) => setR((x) => ({ ...x, tiers: x.tiers.map((t, j) => (j === i ? { ...t, [k]: v } : t)) }))
+  const save = useAction(() => patch(`/api/models/${model.id}`, { strategy: 'complexity', routing: { ...r, judge_model: r.classifier === 'hybrid' ? r.judge_model : undefined } }), { done: 'Router saved', invalidate: [['models']] })
+  const opts = [{ value: '', label: 'Choose…' }, ...targets.map((m) => ({ value: m.name, label: m.name }))]
+  return (
+    <div className="panel" style={{ padding: 14 }}>
+      <p className="muted" style={{ marginTop: 0 }}>Each request is scored from 0 (trivial) to 1 (hardest) from the length of the ask, conversation size, code, reasoning and maths cues, tools and agent turns, attachments, and any requested thinking. It goes to the first tier whose limit covers the score. Responses carry <code>X-Theophylax-Complexity</code> and receipts record the decision.</p>
+      <table className="tbl">
+        <thead><tr><th>Up to score</th><th>Model</th><th /></tr></thead>
+        <tbody>
+          {r.tiers.map((t, i) => {
+            const last = i === r.tiers.length - 1
+            return (
+              <tr key={i}>
+                <td style={{ width: 140 }}>{last ? <span className="dim">everything harder</span> : <Input type="number" step={0.05} min={0.05} max={0.95} value={t.max_score ?? ''} disabled={disabled} onChange={(e) => setTier(i, 'max_score', e.target.value === '' ? undefined : Number(e.target.value))} />}</td>
+                <td><Select value={t.model} disabled={disabled} onChange={(e) => setTier(i, 'model', e.target.value)} options={opts} /></td>
+                <td className="tight">{r.tiers.length > 2 && !disabled && <Button size="sm" variant="ghost" aria-label="Remove tier" onClick={() => setR((x) => { const tiers = x.tiers.filter((_, j) => j !== i); const { max_score: _m, ...rest } = tiers[tiers.length - 1]; tiers[tiers.length - 1] = rest; return { ...x, tiers } })}><Trash2 size={14} /></Button>}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {!disabled && r.tiers.length < 5 && <Button size="sm" onClick={() => setR((x) => { const tiers = [...x.tiers]; const lastMax = tiers.length > 1 ? tiers[tiers.length - 2].max_score ?? 0.5 : 0.5; tiers[tiers.length - 1] = { ...tiers[tiers.length - 1], max_score: Math.min(0.95, Math.round((lastMax + 0.2) * 100) / 100) }; tiers.push({ model: '' }); return { ...x, tiers } })}>Add tier</Button>}
+      <div className="grid2" style={{ marginTop: 12 }}>
+        <Field label="Classifier" hint="Heuristic is instant, free and deterministic. Hybrid also asks a judge model when a request lands within 0.1 of a tier boundary."><Select value={r.classifier ?? 'heuristic'} disabled={disabled} onChange={(e) => setR((x) => ({ ...x, classifier: e.target.value as any }))} options={[{ value: 'heuristic', label: 'Heuristic' }, { value: 'hybrid', label: 'Hybrid (heuristic + judge near boundaries)' }]} /></Field>
+        {r.classifier === 'hybrid' && <Field label="Judge model" hint="A small, fast model is enough."><Select value={r.judge_model ?? ''} disabled={disabled} onChange={(e) => setR((x) => ({ ...x, judge_model: e.target.value }))} options={opts} /></Field>}
+      </div>
+      {!disabled && <Button variant="primary" busy={save.isPending} disabled={r.tiers.some((t) => !t.model)} onClick={() => save.mutate(undefined)}>Save router</Button>}
+    </div>
   )
 }
 

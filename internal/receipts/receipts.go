@@ -31,6 +31,16 @@ type Route struct {
 	UpstreamModel string `json:"upstream_model,omitempty"`
 	Attempts      int    `json:"attempts"`
 	Cache         string `json:"cache,omitempty"` // "hit" when served from the response cache
+	// Router is set when a complexity router chose Model.
+	Router *RouterDecision `json:"router,omitempty"`
+}
+
+// RouterDecision records how a complexity router chose the model.
+type RouterDecision struct {
+	Model      string  `json:"model"`      // the router model the client asked for
+	Score      float64 `json:"score"`      // 0 (trivial) .. 1 (hardest)
+	Classifier string  `json:"classifier"` // heuristic or judge
+	Tier       int     `json:"tier"`       // 1-based tier that took the request
 }
 
 type PolicyRef struct {

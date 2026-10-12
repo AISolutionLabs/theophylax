@@ -62,6 +62,9 @@ type ProviderEntry struct {
 type Route struct {
 	Model *store.Model
 	Deps  []*Dep
+	// Router is set for models with strategy "complexity": requests are
+	// sent on to one of its tier models.
+	Router *ComplexityRouting
 }
 
 type Dep struct {
@@ -298,6 +301,13 @@ func (l *Loader) Load(ctx context.Context) error {
 	for i := range models {
 		m := &models[i]
 		r := &Route{Model: m}
+		if m.Strategy == "complexity" && len(m.Routing) > 0 {
+			if rt, err := ParseComplexityRouting(m.Routing, nil); err == nil {
+				r.Router = rt
+			} else {
+				slog.Warn("ignoring invalid complexity routing", "model", m.Name, "err", err)
+			}
+		}
 		routes[m.ID] = r
 		if strings.Contains(m.Name, "*") {
 			s.Wildcards = append(s.Wildcards, r)

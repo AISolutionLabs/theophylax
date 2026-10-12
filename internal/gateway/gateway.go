@@ -181,6 +181,8 @@ type reqState struct {
 	respModel string
 	// response cache
 	cacheHit bool
+	// router records a complexity-routing decision for the receipt.
+	router *receipts.RouterDecision
 }
 
 // hashWriter hashes every response body byte so receipts attest to exactly what the client received.
@@ -311,6 +313,52 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	if err := g.checkModelAllowed(snap, p, model, route.Model.Name); err != nil {
 		fail(err)
 		return
+	}
+	if route.Router != nil {
+		// A router model: score the request and continue with a tier model
+		// this caller may use (see checkModelAllowed for how allow-lists
+		// that name the router are read).
+		score, cls := g.classify(r.Context(), route.Router, body, clientOpenAI)
+		chosen, _ := route.Router.Pick(score)
+		// Prefer the chosen tier; if this caller may not use it, the
+		// nearest allowed tier below it, then above it.
+		order := []int{chosen}
+		for i := chosen - 1; i >= 0; i-- {
+			order = append(order, i)
+		}
+		for i := chosen + 1; i < len(route.Router.Tiers); i++ {
+			order = append(order, i)
+		}
+		var tr *Route
+		var firstErr error
+		tier := -1
+		for _, i := range order {
+			name := route.Router.Tiers[i].Model
+			cand := snap.Resolve(name)
+			if cand == nil || cand.Router != nil {
+				if firstErr == nil {
+					firstErr = util.Err(503, "overloaded_error", fmt.Sprintf("router %s: tier model %q is not available", route.Model.Name, name))
+				}
+				continue
+			}
+			if err := g.checkModelAllowed(snap, p, name, cand.Model.Name, route); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			tr, tier = cand, i
+			break
+		}
+		if tr == nil {
+			fail(firstErr)
+			return
+		}
+		st.router = &receipts.RouterDecision{Model: route.Model.Name, Score: score, Classifier: cls, Tier: tier + 1}
+		setRouteHeader(w.Header(), score, cls, tr.Model.Name)
+		metrics.Routed.Inc(route.Model.Name, tr.Model.Name)
+		route, model = tr, tr.Model.Name
+		st.canonical, st.log.Model = model, model
 	}
 
 	st.scopes = []ScopeRef{{"org", p.OrgID}}
@@ -827,13 +875,34 @@ done:
 
 // ---------------------------------------------------------------------------
 
-func (g *Gateway) checkModelAllowed(snap *Snapshot, p *auth.Principal, requested, canonical string) error {
+// router, when set, is the complexity router the model was reached through.
+// A list that admits the router but names none of its tier models leaves
+// the choice to the router; a list that names tier models admits only those.
+func (g *Gateway) checkModelAllowed(snap *Snapshot, p *auth.Principal, requested, canonical string, router ...*Route) error {
+	matches := func(list []string, name string) bool {
+		for _, pat := range list {
+			if util.MatchModel(pat, name) {
+				return true
+			}
+		}
+		return false
+	}
 	check := func(list []string, where string) error {
-		if len(list) == 0 {
+		if len(list) == 0 || matches(list, requested) || matches(list, canonical) {
 			return nil
 		}
-		for _, pat := range list {
-			if util.MatchModel(pat, requested) || util.MatchModel(pat, canonical) {
+		if len(router) > 0 && router[0] != nil && router[0].Router != nil {
+			rt := router[0]
+			names := append([]string{rt.Model.Name}, rt.Model.Aliases...)
+			admitsRouter := false
+			for _, n := range names {
+				admitsRouter = admitsRouter || matches(list, n)
+			}
+			namesTier := false
+			for _, t := range rt.Router.Tiers {
+				namesTier = namesTier || matches(list, t.Model)
+			}
+			if admitsRouter && !namesTier {
 				return nil
 			}
 		}
@@ -967,7 +1036,7 @@ func (g *Gateway) buildReceipt(st *reqState) *receipts.Receipt {
 	rc := &receipts.Receipt{Version: 1, ID: st.log.ID, Issuer: g.Cfg.PublicURL, IssuedAt: time.Now().Unix(), OrgID: p.OrgID, TeamID: p.TeamID, ProjectID: p.ProjectID,
 		AgentID: util.Deref(st.log.AgentID), Endpoint: st.log.Endpoint, Requested: st.log.Model, ReqSHA256: st.reqDigest,
 		RespSHA256: hex.EncodeToString(st.hw.h.Sum(nil)), Stream: st.log.Stream, Status: st.log.Status, CostUSD: st.log.CostUSD,
-		Route:    receipts.Route{Model: st.canonical, ProviderID: util.Deref(st.log.ProviderID), ProviderKind: st.log.ProviderKind, UpstreamModel: st.log.UpstreamModel, Attempts: st.log.Attempts, Cache: map[bool]string{true: "hit"}[st.cacheHit]},
+		Route:    receipts.Route{Model: st.canonical, ProviderID: util.Deref(st.log.ProviderID), ProviderKind: st.log.ProviderKind, UpstreamModel: st.log.UpstreamModel, Attempts: st.log.Attempts, Cache: map[bool]string{true: "hit"}[st.cacheHit], Router: st.router},
 		Usage:    receipts.Usage{Input: st.log.InputTokens, Output: st.log.OutputTokens, CacheRead: st.log.CacheReadTokens, CacheWrite: st.log.CacheWriteTokens},
 		Policies: []receipts.PolicyRef{}, Actions: []receipts.Action{}}
 	if p.Key != nil {
@@ -1196,7 +1265,7 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
 	var list []mi
 	for _, rt := range snap.Models {
 		m := rt.Model
-		if seen[m.ID] || m.Status == "deprecated" || len(rt.Order(p.OrgID)) == 0 {
+		if seen[m.ID] || m.Status == "deprecated" || (rt.Router == nil && len(rt.Order(p.OrgID)) == 0) {
 			continue
 		}
 		if g.checkModelAllowed(snap, p, m.Name, m.Name) != nil {

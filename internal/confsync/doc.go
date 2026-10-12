@@ -77,16 +77,18 @@ func (p Provider) ref() string {
 }
 
 type Model struct {
-	Name          string       `json:"name"`
-	DisplayName   string       `json:"display_name,omitempty"`
-	Family        string       `json:"family,omitempty"`
-	Aliases       []string     `json:"aliases"`
-	ContextWindow *int         `json:"context_window,omitempty"`
-	MaxOutput     *int         `json:"max_output,omitempty"`
-	Capabilities  []string     `json:"capabilities"`
-	Status        string       `json:"status,omitempty"`
-	Strategy      string       `json:"strategy,omitempty"`
-	Deployments   []Deployment `json:"deployments"`
+	Name          string   `json:"name"`
+	DisplayName   string   `json:"display_name,omitempty"`
+	Family        string   `json:"family,omitempty"`
+	Aliases       []string `json:"aliases"`
+	ContextWindow *int     `json:"context_window,omitempty"`
+	MaxOutput     *int     `json:"max_output,omitempty"`
+	Capabilities  []string `json:"capabilities"`
+	Status        string   `json:"status,omitempty"`
+	Strategy      string   `json:"strategy,omitempty"`
+	// Routing holds a complexity router's tiers (strategy "complexity").
+	Routing     json.RawMessage `json:"routing,omitempty"`
+	Deployments []Deployment    `json:"deployments"`
 }
 
 type Deployment struct {

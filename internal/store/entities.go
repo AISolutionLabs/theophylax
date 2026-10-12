@@ -127,19 +127,21 @@ type Provider struct {
 }
 
 type Model struct {
-	ID            string    `db:"id" json:"id"`
-	Name          string    `db:"name" json:"name"`
-	DisplayName   string    `db:"display_name" json:"display_name"`
-	Family        string    `db:"family" json:"family"`
-	Aliases       []string  `db:"aliases" json:"aliases"`
-	ContextWindow int       `db:"context_window" json:"context_window"`
-	MaxOutput     int       `db:"max_output" json:"max_output"`
-	Capabilities  []string  `db:"capabilities" json:"capabilities"`
-	Status        string    `db:"status" json:"status"`
-	Strategy      string    `db:"strategy" json:"strategy"`
-	Source        string    `db:"source" json:"source"`
-	CreatedAt     time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
+	ID            string   `db:"id" json:"id"`
+	Name          string   `db:"name" json:"name"`
+	DisplayName   string   `db:"display_name" json:"display_name"`
+	Family        string   `db:"family" json:"family"`
+	Aliases       []string `db:"aliases" json:"aliases"`
+	ContextWindow int      `db:"context_window" json:"context_window"`
+	MaxOutput     int      `db:"max_output" json:"max_output"`
+	Capabilities  []string `db:"capabilities" json:"capabilities"`
+	Status        string   `db:"status" json:"status"`
+	Strategy      string   `db:"strategy" json:"strategy"`
+	Source        string   `db:"source" json:"source"`
+	// Routing configures a router model (strategy "complexity").
+	Routing   json.RawMessage `db:"routing" json:"routing,omitempty"`
+	CreatedAt time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time       `db:"updated_at" json:"updated_at"`
 }
 
 type Deployment struct {

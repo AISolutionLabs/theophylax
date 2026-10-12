@@ -47,8 +47,9 @@ func (g *Gateway) responses(w http.ResponseWriter, r *http.Request) {
 	dec.UseNumber()
 	_ = dec.Decode(&body)
 	model, _ := body["model"].(string)
-	route := g.Loader.Snapshot().Resolve(model)
-	if body == nil || route == nil || !needsBridge(route) {
+	snap := g.Loader.Snapshot()
+	route := snap.Resolve(model)
+	if body == nil || route == nil || !needsBridgeFor(snap, route) {
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		g.relay(w, r)
 		return
@@ -65,6 +66,20 @@ func (g *Gateway) responses(w http.ResponseWriter, r *http.Request) {
 	r2.Body = io.NopCloser(bytes.NewReader(nb))
 	r2.ContentLength = int64(len(nb))
 	g.inference(w, r2, providers.FormatAnthropic, "")
+}
+
+// needsBridgeFor also covers router models: they are bridged when any of
+// their tier models needs it, so the router decides on the Messages form.
+func needsBridgeFor(snap *Snapshot, rt *Route) bool {
+	if rt.Router != nil {
+		for _, t := range rt.Router.Tiers {
+			if tr := snap.Resolve(t.Model); tr != nil && tr.Router == nil && needsBridge(tr) {
+				return true
+			}
+		}
+		return false
+	}
+	return needsBridge(rt)
 }
 
 func needsBridge(rt *Route) bool {

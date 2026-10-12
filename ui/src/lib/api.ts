@@ -60,7 +60,9 @@ export interface Provider { id: string; org_id?: string; name: string; kind: str
 export interface PriceQuote { key: string; input: number | null; output: number | null; cache_read: number | null; cache_write: number | null; cache_write_1h: number | null; tiers?: number[] }
 export interface PricingStatus { source: string; fetched_at: string | null; models: number; last_error?: string; refresh_every: string }
 export interface Deployment { id: string; model_id: string; provider_id: string; upstream_model: string; weight: number; priority: number; enabled: boolean; provider_name: string; provider_kind: string; pricing: PriceQuote | null }
-export interface Model { id: string; name: string; display_name: string; family: string; aliases: string[]; context_window: number; max_output: number; capabilities: string[]; status: string; strategy: string; source: string; deployments: Deployment[]; requests_24h: number }
+export interface Model { id: string; name: string; display_name: string; family: string; aliases: string[]; context_window: number; max_output: number; capabilities: string[]; status: string; strategy: string; source: string; deployments: Deployment[]; requests_24h: number; routing?: ComplexityRouting | null }
+/** Tiers of a complexity router: each request goes to the first tier whose max_score covers its 0–1 complexity score. */
+export interface ComplexityRouting { tiers: { max_score?: number; model: string }[]; classifier?: 'heuristic' | 'hybrid'; judge_model?: string }
 export interface Guardrail { id: string; org_id: string; scope_type: string; scope_id: string; scope_name: string; name: string; description: string; enabled: boolean; mode: 'enforce' | 'monitor'; rules: Rule[]; can_edit: boolean; updated_at: string }
 export interface Rule { type: string; action?: string; apply_to?: string; entities?: string[]; patterns?: string[]; words?: string[]; models?: string[]; max?: number; threshold?: number; message?: string; scope?: string; url?: string; timeout_ms?: number; fail_open?: boolean; provider_id?: string; guardrail_id?: string; version?: string; restore?: boolean; detector?: string; judge_model?: string; canary?: boolean; exfil_guard?: boolean; tool_guard?: boolean; allow_domains?: string[]; api_key?: string; project_id?: string; model?: string; headers?: Record<string, string> }
 export interface Budget { id: string; org_id: string; scope_type: string; scope_id: string; scope_name: string; period: string; limit_usd?: number | null; limit_tokens?: number | null; per_user: boolean; alert_pct: number; action: string; spent_usd: number; spent_tokens: number; can_edit: boolean }
@@ -76,7 +78,7 @@ export interface RequestLog { id: string; ts: string; org_id: string; team_id?: 
 export interface AuditEntry { seq: number; id: string; ts: string; actor_type: string; actor_id: string; actor_email: string; org_id?: string; action: string; target_type: string; target_id: string; details: any; ip: string; user_agent: string }
 export interface Receipt {
   v: number; rid: string; iss: string; iat: number; org: string; team?: string; project?: string; sub: { type: string; id: string }; agent?: string; endpoint: string; model_requested: string
-  route: { model: string; provider_id?: string; provider_kind?: string; upstream_model?: string; attempts: number }
+  route: { model: string; provider_id?: string; provider_kind?: string; upstream_model?: string; attempts: number; cache?: string; router?: { model: string; score: number; classifier: string; tier: number } }
   req_sha256: string; resp_sha256: string; stream: boolean; status: number
   policies: { id: string; name: string; scope: string; mode: string; digest: string }[]
   actions: { policy: string; rule: string; action: string; phase: string; count?: number }[]

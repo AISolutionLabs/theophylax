@@ -33,6 +33,7 @@ type Config struct {
 	TrustedProxies    bool
 	RateLimitSync     time.Duration
 	PricingURL        string
+	SMTPURL           string // THEOPHYLAX_SMTP_URL for email alerts
 	PricingRefresh    time.Duration
 }
 
@@ -101,6 +102,7 @@ func Load() (*Config, error) {
 		// 0 disables fleet-wide sync (limits become per replica).
 		RateLimitSync:  envDur("THEOPHYLAX_RATE_LIMIT_SYNC", 500*time.Millisecond),
 		PricingURL:     env("THEOPHYLAX_PRICING_URL", ""),
+		SMTPURL:        env("THEOPHYLAX_SMTP_URL", ""),
 		PricingRefresh: envDur("THEOPHYLAX_PRICING_REFRESH", 6*time.Hour),
 	}
 	mk := env("THEOPHYLAX_MASTER_KEY", "")

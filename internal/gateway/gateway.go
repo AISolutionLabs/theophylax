@@ -43,6 +43,8 @@ type Gateway struct {
 	Audit    *audit.Logger
 	Export   *export.Exporter // optional OTLP / log sink streaming
 	Pricing  *pricing.Catalog
+	// OnBlock, if set, is told about every request a guardrail blocked (for alerts).
+	OnBlock func(orgID, policy, rule, detail string)
 }
 
 func (g *Gateway) Routes(mux *http.ServeMux) {
@@ -858,6 +860,9 @@ func (g *Gateway) finish(st *reqState) {
 		st.log.Guardrails, _ = json.Marshal(st.gr)
 		for _, f := range st.gr {
 			metrics.Guardrail.Inc(f.Rule, f.Action)
+			if f.Action == "block" && g.OnBlock != nil {
+				g.OnBlock(util.Deref(st.log.OrgID), f.Policy, f.Rule, f.Detail)
+			}
 		}
 	}
 	prov := st.log.ProviderKind

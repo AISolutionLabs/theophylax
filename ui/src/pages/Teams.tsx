@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Boxes, Plus, Trash2 } from 'lucide-react'
-import { del, get, patch, post, type Membership, type Project, type ScopeSettings, type Team } from '../lib/api'
+import { cacheTTLs, del, get, patch, post, type Membership, type Project, type ScopeSettings, type Team } from '../lib/api'
 import { useApp } from '../lib/app'
 import { useProjects, useRoutableModels, useTeams } from '../lib/queries'
 import { Badge, Button, ChipsInput, Confirm, Drawer, Empty, ErrorNote, Field, Input, Loading, PageHead, RoleBadge, Select, Tabs, Textarea, useAction } from '../components/ui'
@@ -63,6 +63,8 @@ function settingsSummary(s: ScopeSettings) {
   if (s?.rpm) parts.push(`${s.rpm} rpm`)
   if (s?.tpm) parts.push(`${s.tpm.toLocaleString()} tpm`)
   if (s?.log_payloads) parts.push('payload logging on')
+  if (s?.cache_ttl_seconds && s.cache_ttl_seconds > 0) parts.push('response cache on')
+  if (s?.cache_ttl_seconds === -1) parts.push('response cache off')
   return parts.join(' · ') || 'Inherits limits'
 }
 
@@ -78,6 +80,10 @@ function SettingsFields({ value, onChange, disabled }: { value: ScopeSettings; o
       <Field label="Payload logging" hint="Stores prompts and responses (after redaction) for debugging. Leave inherited unless you need it.">
         <Select value={value.log_payloads == null ? '' : value.log_payloads ? 'on' : 'off'} onChange={(e) => onChange({ ...value, log_payloads: e.target.value === '' ? null : e.target.value === 'on' })}
           options={[{ value: '', label: 'Inherit' }, { value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+      </Field>
+      <Field label="Response cache" hint="Answers identical requests from cache without calling the provider, at no cost. Entries stay within this scope's projects.">
+        <Select value={String(value.cache_ttl_seconds ?? 0)} onChange={(e) => onChange({ ...value, cache_ttl_seconds: Number(e.target.value) })}
+          options={[{ value: '0', label: 'Inherit' }, { value: '-1', label: 'Off' }, ...cacheTTLs]} />
       </Field>
     </fieldset>
   )

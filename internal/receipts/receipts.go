@@ -30,6 +30,7 @@ type Route struct {
 	ProviderKind  string `json:"provider_kind,omitempty"`
 	UpstreamModel string `json:"upstream_model,omitempty"`
 	Attempts      int    `json:"attempts"`
+	Cache         string `json:"cache,omitempty"` // "hit" when served from the response cache
 }
 
 type PolicyRef struct {

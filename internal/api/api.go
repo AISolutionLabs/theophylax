@@ -42,6 +42,7 @@ type API struct {
 	Watch            *modelwatch.Watcher
 	Pricing          *pricing.Catalog
 	Alerts           *alerts.Alerter
+	Cache            *gateway.ResponseCache
 }
 
 type Ctx struct {
@@ -253,6 +254,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/notifications/{id}", h(a.updateChannel))
 	mux.HandleFunc("DELETE /api/notifications/{id}", h(a.deleteChannel))
 	mux.HandleFunc("POST /api/notifications/{id}/test", h(a.testChannel))
+	mux.HandleFunc("DELETE /api/orgs/{org}/cache", h(a.purgeCache))
 
 	// Identity providers
 	mux.HandleFunc("GET /api/orgs/{org}/idps", h(a.listIdPs))

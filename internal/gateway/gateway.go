@@ -45,6 +45,7 @@ type Gateway struct {
 	Pricing  *pricing.Catalog
 	// OnBlock, if set, is told about every request a guardrail blocked (for alerts).
 	OnBlock func(orgID, policy, rule, detail string)
+	Cache   *ResponseCache // optional response cache
 }
 
 func (g *Gateway) Routes(mux *http.ServeMux) {
@@ -175,6 +176,8 @@ type reqState struct {
 	// respModel is the model name the upstream reported serving, used to
 	// price deployments whose configured ID is an alias (e.g. Azure deployment names).
 	respModel string
+	// response cache
+	cacheHit bool
 }
 
 // hashWriter hashes every response body byte so receipts attest to exactly what the client received.
@@ -366,6 +369,15 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 			clientHdr.Add(h, v)
 		}
 	}
+	// Response cache: off unless the scope sets cache_ttl_seconds; the client
+	// can opt out per request.
+	cacheFor, cacheMode := time.Duration(0), strings.ToLower(r.Header.Get(CacheHeader))
+	if g.Cache != nil && cacheMode != "off" {
+		cacheFor = cacheTTL(snap, p)
+	}
+	var capture *captureBody
+	var captureKey []byte
+	var captureCT string
 	for i, d := range deps {
 		if i >= 4 {
 			break
@@ -383,6 +395,22 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 		}
 		var hdr http.Header
 		nb, hdr = applyMCP(nb, clientHdr, prov.Kind())
+		var ckey []byte
+		if cacheFor > 0 && !strings.HasPrefix(d.ID, "rollout:") {
+			ckey = cacheKey(p, d.ProviderID, upstream, stream, nb, hdr)
+			if cacheMode != "refresh" {
+				if hit := g.Cache.Get(r.Context(), ckey); hit != nil {
+					metrics.Cache.Inc("hit")
+					resp, used, st.cacheHit = hit, d, true
+					st.log.TTFBMS = int(time.Since(st.start).Milliseconds())
+					st.log.UpstreamModel = upstream
+					st.log.ProviderID = &d.ProviderID
+					st.log.ProviderKind = prov.Kind()
+					break
+				}
+				metrics.Cache.Inc("miss")
+			}
+		}
 		t0 := time.Now()
 		resp, lastErr = prov.Send(r.Context(), &providers.Request{Body: nb, Stream: stream, UpstreamModel: upstream, Header: hdr})
 		if lastErr == nil {
@@ -393,6 +421,10 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 			st.log.UpstreamModel = upstream
 			st.log.ProviderID = &d.ProviderID
 			st.log.ProviderKind = prov.Kind()
+			if ckey != nil {
+				capture = &captureBody{ReadCloser: resp.Body}
+				resp.Body, captureKey, captureCT = capture, ckey, resp.Header.Get("Content-Type")
+			}
 			break
 		}
 		if r.Context().Err() != nil {
@@ -428,6 +460,15 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	pf := used.Provider.P.Format()
 	w.Header().Set("X-Theophylax-Provider", used.Provider.Row.Name)
 	w.Header().Set("X-Theophylax-Model", route.Model.Name)
+	if cacheFor > 0 {
+		state := "miss"
+		if st.cacheHit {
+			state = "hit"
+		} else if cacheMode == "refresh" {
+			state = "refresh"
+		}
+		w.Header().Set(CacheHeader, state)
+	}
 
 	var usage providers.Usage
 	var status int
@@ -440,6 +481,20 @@ func (g *Gateway) inference(w http.ResponseWriter, r *http.Request, cf providers
 	st.log.InputTokens, st.log.OutputTokens = usage.Input, usage.Output
 	st.log.CacheReadTokens, st.log.CacheWriteTokens = usage.CacheRead, usage.CacheWrite
 	st.log.CostUSD, st.log.PriceKey = g.Pricing.Cost(st.log.ProviderKind, usage, st.log.UpstreamModel, st.respModel)
+	if st.cacheHit {
+		// Served from cache: no provider call, so nothing is billed.
+		st.log.CostUSD, st.log.PriceKey = 0, "cache"
+	}
+	if capture != nil && status == 200 {
+		// Stream readers may stop at the final event; read any remainder so a
+		// complete response is recognised.
+		_, _ = io.Copy(io.Discard, io.LimitReader(capture, maxCacheEntry))
+		if capture.complete() {
+			body := append([]byte(nil), capture.buf.Bytes()...)
+			org, proj := p.OrgID, p.ProjectID
+			go g.Cache.Put(context.Background(), captureKey, org, proj, captureCT, body, cacheFor)
+		}
+	}
 	finish(status, errMsg)
 	if strings.HasPrefix(used.ID, "rollout:") {
 		go g.recordCanary(strings.TrimPrefix(used.ID, "rollout:"), status, time.Since(st.start))
@@ -876,7 +931,7 @@ func (g *Gateway) finish(st *reqState) {
 		metrics.Cost.Add(st.log.CostUSD, st.log.Model)
 	}
 	tok := st.log.InputTokens + st.log.OutputTokens + st.log.CacheReadTokens + st.log.CacheWriteTokens
-	if tok > 0 {
+	if tok > 0 && !st.cacheHit { // cache hits use no provider tokens
 		for _, sc := range st.scopes {
 			if sc.Type != "user" && sc.Type != "org_user" && sc.Type != "team_user" {
 				g.RL.AddTokens(sc.Type+":"+sc.ID, tok)
@@ -909,7 +964,7 @@ func (g *Gateway) buildReceipt(st *reqState) *receipts.Receipt {
 	rc := &receipts.Receipt{Version: 1, ID: st.log.ID, Issuer: g.Cfg.PublicURL, IssuedAt: time.Now().Unix(), OrgID: p.OrgID, TeamID: p.TeamID, ProjectID: p.ProjectID,
 		AgentID: util.Deref(st.log.AgentID), Endpoint: st.log.Endpoint, Requested: st.log.Model, ReqSHA256: st.reqDigest,
 		RespSHA256: hex.EncodeToString(st.hw.h.Sum(nil)), Stream: st.log.Stream, Status: st.log.Status, CostUSD: st.log.CostUSD,
-		Route:    receipts.Route{Model: st.canonical, ProviderID: util.Deref(st.log.ProviderID), ProviderKind: st.log.ProviderKind, UpstreamModel: st.log.UpstreamModel, Attempts: st.log.Attempts},
+		Route:    receipts.Route{Model: st.canonical, ProviderID: util.Deref(st.log.ProviderID), ProviderKind: st.log.ProviderKind, UpstreamModel: st.log.UpstreamModel, Attempts: st.log.Attempts, Cache: map[bool]string{true: "hit"}[st.cacheHit]},
 		Usage:    receipts.Usage{Input: st.log.InputTokens, Output: st.log.OutputTokens, CacheRead: st.log.CacheReadTokens, CacheWrite: st.log.CacheWriteTokens},
 		Policies: []receipts.PolicyRef{}, Actions: []receipts.Action{}}
 	if p.Key != nil {

@@ -105,7 +105,8 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	if exp != nil {
 		al.OnRecord = exp.Audit
 	}
-	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp, Pricing: prices}
+	respCache := &gateway.ResponseCache{St: st, Box: box}
+	gw := &gateway.Gateway{Cfg: cfg, St: st, Loader: loader, Guard: guard, RL: gateway.NewSharedRateLimiter(st, cfg.RateLimitSync), Budgets: budgets, Logs: logs, Resolver: resolver, Signer: signer, Audit: al, Export: exp, Pricing: prices, Cache: respCache}
 	guard.Judge = gw.Judge
 	api.Version = version
 	smtpCfg, err := alerts.ParseSMTPURL(cfg.SMTPURL)
@@ -117,7 +118,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	alerter := &alerts.Alerter{St: st, Box: box, Loader: loader, Budgets: budgets, PublicURL: cfg.PublicURL,
 		Deliver: &alerts.Deliverer{HTTP: util.SafeHTTPClient(15*time.Second, cfg.DevMode), SMTP: smtpCfg}}
 	gw.OnBlock = alerter.GuardrailBlocked
-	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global(), Pricing: prices, Alerts: alerter}
+	ap := &api.API{Cfg: cfg, St: st, Box: box, Res: resolver, Audit: al, Loader: loader, Guard: guard, Budgets: budgets, Signer: signer, Export: exp, RateLimitsGlobal: gw.RL.Global(), Pricing: prices, Alerts: alerter, Cache: respCache}
 	watch := modelwatch.New(st, prices, func() map[string]providers.Provider {
 		out := map[string]providers.Provider{}
 		for id, e := range loader.Snapshot().Providers {
@@ -144,6 +145,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*Server, erro
 	go loader.Run(bg, pool)
 	go budgets.Run(bg)
 	go alerter.Run(bg)
+	go respCache.Run(bg)
 	go prices.Run(bg)
 	go logs.Run(bg)
 	go gw.RL.Run(bg)

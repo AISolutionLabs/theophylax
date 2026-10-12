@@ -187,6 +187,7 @@ var (
 	UpstreamErrors = Default.Counter("theophylax_upstream_errors_total", "Upstream failures (incl. retried)", "provider", "status")
 	Guardrail      = Default.Counter("theophylax_guardrail_actions_total", "Guardrail actions", "rule", "action")
 	LogDropped     = Default.Counter("theophylax_log_dropped_total", "Request logs dropped due to back-pressure")
+	Cache          = Default.Counter("theophylax_cache_total", "Response cache lookups", "result")
 	Latency        = Default.Histogram("theophylax_request_duration_seconds", "End-to-end request latency", []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300}, "model")
 	TTFB           = Default.Histogram("theophylax_ttfb_seconds", "Time to first byte from upstream", []float64{.05, .1, .25, .5, 1, 2, 5, 10, 30}, "model")
 	Overhead       = Default.Histogram("theophylax_gateway_overhead_seconds", "Gateway processing time before upstream call", []float64{.0005, .001, .0025, .005, .01, .025, .05, .1})

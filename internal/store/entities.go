@@ -19,6 +19,9 @@ type ScopeSettings struct {
 	LogPayloads   *bool    `json:"log_payloads,omitempty"`
 	RPM           int      `json:"rpm,omitempty"`
 	TPM           int      `json:"tpm,omitempty"`
+	// CacheTTL enables the response cache for this scope, in seconds (max 7
+	// days). 0 inherits from the parent scope; -1 turns it off here.
+	CacheTTL int `json:"cache_ttl_seconds,omitempty"`
 }
 
 type User struct {

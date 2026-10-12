@@ -115,6 +115,19 @@ Channel URLs are stored encrypted, shown only as their host, and fetched through
 
 Generic webhooks receive the event as JSON (`event`, `org_id`, `title`, `text`, `link`, `fields`, `ts`) with an `X-Theophylax-Event` header. With a signing secret, each request also carries `X-Theophylax-Timestamp` and `X-Theophylax-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">`; verify the signature and reject old timestamps to prevent replays.
 
+## Response cache
+
+Identical requests can be answered from a cache instead of calling the provider again — no latency, no cost. It is **off by default**. Turn it on per organization, team or project with `cache_ttl_seconds` (console: Settings → Organization defaults, or a team or project's settings; up to 7 days). The most specific scope that sets it wins, and `-1` turns caching off for that scope.
+
+- **What matches:** the organization and project, the deployment and upstream model, streaming or not, the exact request as sent upstream (after guardrail redaction and managed-agent overlays), and the `anthropic-version` and `anthropic-beta` headers. Entries are never shared across organizations or projects.
+- **How hits are served:** the stored upstream response is replayed through the normal pipeline, so streaming, format translation, output guardrails (re-evaluated with the current policies), Secret Shield restoration, usage and receipts all behave as for a live call. Because the upstream only ever saw placeholders, cached entries contain no secrets, and they are encrypted with the master key.
+- **Accounting:** a hit is logged with `price_key = "cache"` and $0 cost, does not count against budgets or token rate limits, and its receipt carries `"route": {"cache": "hit"}`.
+- **What is stored:** only complete, successful responses up to 4 MiB. Requests to rollout canaries are not cached. Supported on `/v1/messages`, `/v1/chat/completions` and managed-agent endpoints.
+- **Per request:** responses carry `X-Theophylax-Cache: hit | miss | refresh` when caching applies. Clients can send `X-Theophylax-Cache: off` to bypass the cache or `refresh` to skip the lookup and store a fresh answer.
+- **Clearing:** `DELETE /api/orgs/{org}/cache` (optionally `?project_id=…`), or **Clear cache** in the console. Entries are not invalidated when a provider's configuration changes; clear the cache if that matters. Expired entries are removed every few minutes. Metric: `theophylax_cache_total{result}`.
+
+Caching returns the same answer for the same request, which is usually what you want for evaluation suites, CI, retrieval pipelines and repeated agent steps, but not where you rely on sampling variety; leave it off (or send `off`) for those.
+
 ## Budgets
 
 Budgets are either **pooled** (one cap on the combined spend of an org, team, project or key) or **per-person**. A person's own limit for each period (daily, monthly, all time) is the first of these that exists:

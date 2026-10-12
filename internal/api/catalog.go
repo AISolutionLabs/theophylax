@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"theophylax/internal/auth"
+	"theophylax/internal/gateway"
 	"theophylax/internal/pricing"
 	"theophylax/internal/providers"
 	"theophylax/internal/store"
@@ -354,6 +355,8 @@ type modelIn struct {
 	Capabilities  *[]string `json:"capabilities"`
 	Status        *string   `json:"status"`
 	Strategy      *string   `json:"strategy"`
+	// Routing configures a router model (strategy "complexity").
+	Routing *json.RawMessage `json:"routing"`
 }
 
 func applyModelIn(m *store.Model, in *modelIn) {
@@ -381,6 +384,12 @@ func applyModelIn(m *store.Model, in *modelIn) {
 	if in.Status != nil {
 		m.Status = *in.Status
 	}
+	if in.Routing != nil {
+		m.Routing = *in.Routing
+		if t := strings.TrimSpace(string(m.Routing)); t == "" || t == "null" || t == "{}" {
+			m.Routing = nil
+		}
+	}
 	if in.Strategy != nil {
 		m.Strategy = *in.Strategy
 	}
@@ -398,6 +407,9 @@ func (a *API) createModel(c *Ctx) (any, error) {
 	applyModelIn(m, &in)
 	if m.Name == "" {
 		return nil, badReq("name is required")
+	}
+	if err := a.validateRouting(c, m); err != nil {
+		return nil, err
 	}
 	if err := a.St.Insert(c, a.St.Pool, "models", m); err != nil {
 		return nil, err
@@ -421,6 +433,11 @@ func (a *API) updateModel(c *Ctx) (any, error) {
 		return nil, err
 	}
 	applyModelIn(m, &in)
+	if in.Strategy != nil || in.Routing != nil || m.Strategy == "complexity" {
+		if err := a.validateRouting(c, m); err != nil {
+			return nil, err
+		}
+	}
 	if m.Name != before.Name {
 		var provs []string
 		rows, err := a.St.Pool.Query(c, `SELECT DISTINCT provider_id FROM deployments WHERE model_id=$1`, m.ID)
@@ -453,6 +470,9 @@ func (a *API) deleteModel(c *Ctx) (any, error) {
 	m, err := store.GetByID[store.Model](c, a.St.Pool, "models", c.Param("id"))
 	if err != nil {
 		return nil, err
+	}
+	if r := a.routerUsing(c, m); r != "" {
+		return nil, badReq(fmt.Sprintf("router %q sends requests to %s; change its tiers first", r, m.Name))
 	}
 	if err := a.St.Delete(c, a.St.Pool, "models", m.ID); err != nil {
 		return nil, err
@@ -644,4 +664,61 @@ func (a *API) checkModelSuffix(ctx context.Context, providerID, modelName string
 		return badReq(fmt.Sprintf("models routed through credential %q must be named <model>%s (got %q)", strings.TrimPrefix(s, providers.ModelSuffixSep), s, modelName))
 	}
 	return nil
+}
+
+// validateRouting checks a model's strategy and, for a complexity router,
+// that every tier model exists and is not a router itself.
+func (a *API) validateRouting(c *Ctx, m *store.Model) error {
+	switch m.Strategy {
+	case "priority", "weighted", "latency":
+		if len(m.Routing) > 0 {
+			return badReq(`routing applies only to models with strategy "complexity"`)
+		}
+		return nil
+	case "complexity":
+	default:
+		return badReq("strategy must be priority, weighted, latency or complexity")
+	}
+	if len(m.Routing) == 0 {
+		return badReq("a complexity router needs routing tiers")
+	}
+	_, err := gateway.ParseComplexityRouting(m.Routing, func(name string) error {
+		if strings.EqualFold(name, m.Name) {
+			return fmt.Errorf("a router cannot route to itself")
+		}
+		var strategy string
+		err := a.St.Pool.QueryRow(c, `SELECT strategy FROM models WHERE lower(name)=lower($1) OR lower($1) = ANY(SELECT lower(x) FROM unnest(aliases) x) LIMIT 1`, name).Scan(&strategy)
+		if err != nil {
+			return fmt.Errorf("model %q is not in the catalog", name)
+		}
+		if strategy == "complexity" {
+			return fmt.Errorf("model %q is itself a router", name)
+		}
+		return nil
+	})
+	if err != nil {
+		return badReq(err.Error())
+	}
+	return nil
+}
+
+// routerUsing names a complexity router that routes to m, if any.
+func (a *API) routerUsing(c *Ctx, m *store.Model) string {
+	routers, err := store.List[store.Model](c, a.St.Pool, `SELECT * FROM models WHERE strategy='complexity' AND id<>$1`, m.ID)
+	if err != nil {
+		return ""
+	}
+	names := append([]string{m.Name}, m.Aliases...)
+	for _, r := range routers {
+		var rt gateway.ComplexityRouting
+		_ = json.Unmarshal(r.Routing, &rt)
+		for _, t := range append(rt.Tiers, gateway.ComplexityTier{Model: rt.JudgeModel}) {
+			for _, n := range names {
+				if t.Model != "" && strings.EqualFold(t.Model, n) {
+					return r.Name
+				}
+			}
+		}
+	}
+	return ""
 }

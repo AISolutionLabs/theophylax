@@ -48,7 +48,7 @@ A JSON object with these members (types as in the example in [receipts.md](recei
 | `agent` | Managed agent ID, if any. |
 | `endpoint` | Request path, e.g. `/v1/messages`. |
 | `model_requested` | Model name the client asked for. |
-| `route` | `{model, provider_id, provider_kind, upstream_model, attempts, cache}` as recorded by the gateway. `cache` is `"hit"` when the response was served from the response cache (no provider call) and absent otherwise. |
+| `route` | `{model, provider_id, provider_kind, upstream_model, attempts, cache}` as recorded by the gateway. `cache` is `"hit"` when the response was served from the response cache (no provider call) and absent otherwise. `router` (`{model, score, classifier, tier}`) is present when a complexity router chose `model`; `router.model` is the router the client asked for. |
 | `req_sha256` | Hex SHA-256 of the request body (§5). |
 | `resp_sha256` | Hex SHA-256 of the response body (§5). |
 | `stream` | Whether the response was streamed. |

@@ -56,17 +56,18 @@ type lDeployment struct {
 }
 
 type lModel struct {
-	ID            string        `json:"id"`
-	Name          string        `json:"name"`
-	DisplayName   string        `json:"display_name"`
-	Family        string        `json:"family"`
-	Aliases       []string      `json:"aliases"`
-	ContextWindow int           `json:"context_window"`
-	MaxOutput     int           `json:"max_output"`
-	Capabilities  []string      `json:"capabilities"`
-	Status        string        `json:"status"`
-	Strategy      string        `json:"strategy"`
-	Deployments   []lDeployment `json:"deployments"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	DisplayName   string          `json:"display_name"`
+	Family        string          `json:"family"`
+	Aliases       []string        `json:"aliases"`
+	ContextWindow int             `json:"context_window"`
+	MaxOutput     int             `json:"max_output"`
+	Capabilities  []string        `json:"capabilities"`
+	Status        string          `json:"status"`
+	Strategy      string          `json:"strategy"`
+	Routing       json.RawMessage `json:"routing"`
+	Deployments   []lDeployment   `json:"deployments"`
 }
 
 type lGuardrail struct {
@@ -348,6 +349,9 @@ func Export(ctx context.Context, c *Client, org string) (*Doc, []string, error) 
 	for _, m := range l.models {
 		dm := Model{Name: m.Name, DisplayName: m.DisplayName, Family: m.Family, Aliases: nonNil(m.Aliases), ContextWindow: ptr(m.ContextWindow), MaxOutput: ptr(m.MaxOutput),
 			Capabilities: nonNil(m.Capabilities), Status: m.Status, Strategy: m.Strategy, Deployments: []Deployment{}}
+		if !emptyObj(m.Routing) {
+			dm.Routing = m.Routing
+		}
 		for _, dep := range m.Deployments {
 			var ref string
 			for _, p := range l.providers {

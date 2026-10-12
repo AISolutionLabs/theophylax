@@ -154,6 +154,7 @@ function ReceiptView({ q }: { q: ReturnType<typeof useQuery<ReceiptLookup>> }) {
           <dl className="kv">
             <dt>Caller</dt><dd>{rc.sub.type} <span className="mono">{rc.sub.id}</span></dd>
             <dt>Model</dt><dd>requested <span className="mono">{rc.model_requested}</span>, served <span className="mono">{rc.route.upstream_model || '—'}</span> via {rc.route.provider_kind || '—'} ({rc.route.attempts} attempt{rc.route.attempts === 1 ? '' : 's'})</dd>
+            {rc.route.router && <><dt>Router</dt><dd><span className="mono">{rc.route.router.model}</span> scored {rc.route.router.score.toFixed(2)} ({rc.route.router.classifier}) → tier {rc.route.router.tier}, <span className="mono">{rc.route.model}</span></dd></>}
             <dt>Request digest</dt><dd className="digest">sha256:{rc.req_sha256}</dd>
             <dt>Response digest</dt><dd className="digest">sha256:{rc.resp_sha256}</dd>
             <dt>Policies in force</dt><dd>{rc.policies.length ? rc.policies.map((p) => <div key={p.id}>{p.name} <span className="muted">({p.scope}, {p.mode})</span> <span className="digest">{p.digest.slice(0, 19)}…</span></div>) : 'None'}</dd>

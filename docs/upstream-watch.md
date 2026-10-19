@@ -123,3 +123,80 @@ Window: 2026-10-02 to 2026-10-12.
 - **golang.org/x/net** advisory (2026-10-08). **(d)** x/net is not a dependency.
 - **pgx:** no advisories.
 - **npm:** no new advisories for vite 8.3, React 19.3 or TypeScript. Vite shipped backport releases on 2026-10-06/08 (8.3.3/8.3.4) with no advisory published. Dependabot (#21) covers the console group.
+
+## 2026-10-19
+
+Window: 2026-10-09 to 2026-10-19.
+
+### Anthropic
+
+- **Fast mode is out of research preview for Opus 5.5** (2026-10-15). Requests to `claude-opus-5-5` no longer need the `fast-mode-2026-02-01` beta header, which Opus 5 and Opus 4.8 still require. Foundry supports it for Azure-hosted Opus 5.5 deployments. It is billed at $8/$40 per MTok, twice the standard Opus 5.5 rate, and responses report `usage.speed` as `"fast"` or `"standard"`. [Release notes](https://platform.claude.com/docs/en/release-notes/overview), [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
+  - **(a)** `speed` and the beta header pass through on `/v1/messages`.
+  - **(b) Done:** fast-mode requests were priced at standard rates, which undercounted spend and budgets by half. The gateway now reads `usage.speed` and applies the catalog's `provider_specific_entry.fast` multiplier to every rate. Foundry deployments use Anthropic's multiplier.
+  - Fast mode has its own rate limit, separate from standard Opus. Exceeding it returns 429 or 529 with `anthropic-fast-*` rate-limit headers, and failover treats those like any other 429.
+- OpenTelemetry export beta (10-14), Compliance API user preferences (10-15), Managed Agents dynamic workflows (10-09, `workflow_run.*` events on the session stream). **(d)**
+- **No new deprecations.** `claude-haiku-4-5` passed its "not sooner than" date (2026-10-15) with no notice, so the earliest it can retire on the Claude API is mid-December under the 60-day policy. No new SSE events, content block types or stop reasons for the Messages API.
+- **Fable 5.1 / Mythos 5.1** (September, not logged before; `claude-fable-5-1`, Bedrock `anthropic.claude-fable-5-1`; Mythos is limited to verified organizations). **(a)** Discovered and priced through the catalog, and their betas pass through on `/v1/messages`:
+  - `thinking-binding-controls-2026-08-01`: the top-level `input_transformations` response field.
+  - `mid-conversation-output-config-2026-07-01` and `mid-conversation-system-clear-at-2026-08-21`: `role:"system"` messages.
+  - `thinking-display-updates-2026-08-18`.
+  - The Responses bridge does not emit mid-conversation system messages.
+
+### AWS Bedrock
+
+- No doc-history or What's New entries in the window. Mantle is unchanged.
+- **Input for the pending Mantle decision:** since August 2026, AWS recommends `bedrock-runtime` for new applications. That includes an Anthropic Messages route at `POST https://bedrock-runtime.{region}.amazonaws.com/anthropic/v1/messages`, which accepts SigV4 or a Bedrock API key in `x-api-key`. That route would let the gateway reuse its Anthropic transport rather than add a Mantle one. [Endpoints](https://docs.aws.amazon.com/bedrock/latest/userguide/endpoints.html)
+
+### Google Vertex AI / Gemini
+
+- **Gemini 4 Argon GA** (`gemini-4-argon`, 2026-10-13) on the Gemini API and Agent Platform. [Changelog](https://ai.google.dev/gemini-api/docs/changelog)
+  - It silently ignores `temperature`/`top_p`/`top_k` and has no explicit caching.
+  - **(a)** Priced in the catalog, and `reasoning_effort` maps to `thinking_level` on the OpenAI-compatible endpoint.
+  - **(c) Noted here only:** for long decodes Google recommends HTTP timeouts of at least 15 minutes. `THEOPHYLAX_UPSTREAM_TIMEOUT` defaults to 10 minutes, so raise it if deployments route long Argon generations.
+- **Vertex `gemini-2.5-pro` / `-flash` / `-flash-lite`** were due to retire "not before 2026-10-16", and the catalog no longer lists `vertex_ai/gemini-2.5-pro`. No shutdown notice was found. **(a)** The model watcher flags unpriced deployments. Repoint any that remain.
+- Gemini API shutdowns on 2026-10-22 (Veo 3.1 previews, `gemini-omni-flash-preview`) and 2026-11-17 (TTS and live previews). **(d)** These are not on the gateway's surfaces.
+- No changes for Claude on Vertex. **(a)**
+
+### Azure
+
+- No new Azure OpenAI api-version and no api-version retirement. **(d)**
+- **Foundry retires Claude 4.5 models before Anthropic does:** `claude-haiku-4-5` on **2026-11-15**, `claude-opus-4-5` on 2026-11-24 and `claude-sonnet-4-5` on 2026-11-30. Later: `claude-opus-4-6` on 2027-02-02 and `claude-sonnet-4-6` on 2027-02-10. [Retirement schedule](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-retirement-schedule)
+  - **(a)** The catalog carries `azure_ai/claude-haiku-4-5` `deprecation_date` 2026-11-15, so the model watcher flags it. Deployments must be repointed.
+- Fast mode for Opus 5.5 on Foundry: see Anthropic above.
+
+### OpenAI
+
+- **Deprecation (2026-10-14):** `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `gpt-4.1-2025-04-14` and `gpt-4.1-mini-2025-04-14` shut down on **2027-01-14** (replacement `gpt-6-luna`). Earlier notices (10-01): `gpt-5.3-codex`, `gpt-5.1` and `gpt-5.4-nano` shut down on 2027-04-01, and `tts-1`/`tts-1-hd` on 2027-01-06. **(a)** These are catalog and model-watch concerns. [Deprecations](https://developers.openai.com/api/docs/deprecations)
+- GPT-Live → Decisions API, and prompt-to-voice (`v1/audio/voices`). **(d)**
+- No new Responses streaming events, item types or parameters.
+- **Codex CLI 0.163.0** (2026-10-15):
+  - Incomplete responses are now terminal errors, and their usage is counted. **(a)** The bridge emits `response.incomplete` with usage when `stop_reason` is `max_tokens`.
+  - Opt-in output-token replay, retention annotations on tool outputs, and V2 remote compaction. **(a)** Unknown fields are ignored by the bridge and passed through by the relay.
+  - **Watch:** `incremental_tools` is still not the default.
+- Agents SDK v0.24.0: no wire changes. **(d)**
+
+### Competitors
+
+- **LiteLLM** v1.105.1, v1.106.0 and v1.107.0 dev/rc builds:
+  - It now checks that the caller owns a `previous_response_id` (on `/responses/compact`).
+  - Disables stdio MCP servers by default.
+  - Scopes `/spend/tags` to the caller.
+  - Adds default-deny agent access.
+- **Bifrost Enterprise v2.3.0:** business-unit ownership of keys, detect-only guardrails, bounded request decompression, Responses `shell_call`/`apply_patch_call`.
+- **Portkey:** no release.
+- **Needs a decision: `previous_response_id` ownership.** Theophylax relays `previous_response_id` (and `conversation`) to OpenAI-format providers unchanged. When several tenants share one upstream credential, a client that learns another tenant's response ID could continue that conversation. Response IDs are unguessable and returned only to their creator, so this is low risk. A fix needs a table mapping response IDs to the principal that created them, which is a security-model change and should go through an issue first.
+- Nothing else adopted. Per-member budget alerts and MCP description pinning are still on the list from 2026-10-12.
+
+### Security
+
+- **Go:** no release after 1.27.2/1.26.9.
+- **golang.org/x/net** HTTP/2 advisories (2026-10-08). **(d)** x/net is not a dependency.
+- **pgx:** no new advisories.
+- **x/text:** Dependabot #51 bumps it to v0.43.0. No advisory was found for it.
+- **React** GHSA-xqc2-xf4c-x3h3 (critical RCE) and GHSA-h3gv-c5rc-p453 (DoS), 2026-10-14. **(d)** They affect only `react-server-dom-*` (Server Components). The console is a client-only Vite SPA and uses only `react`/`react-dom`. Dependabot #52 moves React within the console group.
+- **vite, @vitejs/plugin-react, typescript:** nothing new.
+
+### Follow-ups not implemented
+
+- **Service-tier pricing:** OpenAI `service_tier` priority/flex/ultrafast and Gemini priority/flex are listed in the catalog as `*_priority`, `*_flex` and `*_ultrafast` keys, but requests are billed at default rates. Supporting them means reading the response's `service_tier` and adding rate keys: the same mechanism as fast mode, but a separate change.
+- **Data-residency multipliers:** Anthropic `provider_specific_entry.us` (1.1×) is not applied.

@@ -16,6 +16,9 @@ type Usage struct {
 	// CacheWrite1h is the part of CacheWrite written with a 1-hour TTL, which
 	// is billed at a higher rate than the default 5-minute TTL.
 	CacheWrite1h int `json:"cache_write_1h_tokens,omitempty"`
+	// Speed is the Messages API usage.speed ("fast" or "standard"). Fast mode
+	// is billed at a multiple of the standard rates.
+	Speed string `json:"speed,omitempty"`
 }
 
 func (u Usage) Total() int { return u.Input + u.Output + u.CacheRead + u.CacheWrite }
@@ -49,6 +52,7 @@ func AnthropicUsage(u map[string]any) Usage {
 		CacheRead:    num(u["cache_read_input_tokens"]),
 		CacheWrite:   num(u["cache_creation_input_tokens"]),
 		CacheWrite1h: num(asMap(u["cache_creation"])["ephemeral_1h_input_tokens"]),
+		Speed:        str(u["speed"]),
 	}
 }
 

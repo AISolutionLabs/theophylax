@@ -29,6 +29,9 @@ const fixture = `{
   "eu.anthropic.claude-opus-5-5": {"litellm_provider": "bedrock_converse", "input_cost_per_token": 4.4e-06, "output_cost_per_token": 2.2e-05},
   "vertex_ai/claude-sonnet-5-5": {"litellm_provider": "vertex_ai-anthropic_models", "input_cost_per_token": 2e-06, "output_cost_per_token": 1e-05},
   "azure_ai/claude-opus-5-5": {"litellm_provider": "azure_ai", "input_cost_per_token": 4e-06, "output_cost_per_token": 2e-05},
+  "claude-opus-5-5": {"litellm_provider": "anthropic", "input_cost_per_token": 4e-06, "output_cost_per_token": 2e-05,
+    "cache_read_input_token_cost": 2e-07, "cache_creation_input_token_cost": 5e-06, "cache_creation_input_token_cost_above_1hr": 8e-06,
+    "provider_specific_entry": {"us": 1.1, "fast": 2}, "supports_fast_mode": true},
   "claude-haiku-5-5": {"litellm_provider": "anthropic", "input_cost_per_token": 1e-07, "output_cost_per_token": 5e-07,
     "cache_read_input_token_cost": 1e-08, "cache_creation_input_token_cost": 1.25e-07, "cache_creation_input_token_cost_above_1hr": 2e-07,
     "input_cost_per_token_above_100k_tokens": 5e-07, "output_cost_per_token_above_100k_tokens": 2.5e-06,
@@ -114,6 +117,35 @@ func TestCostIsExactListPrice(t *testing.T) {
 	want := 1000*3e-06 + 500*1.5e-05 + 2000*3e-07 + 300*3.75e-06 + 100*6e-06
 	if key != "claude-sonnet-4-5-20250929" || !near(got, want) {
 		t.Fatalf("cost = %v (%s), want %v", got, key, want)
+	}
+}
+
+func TestFastModeMultiplier(t *testing.T) {
+	c := catalog(t)
+	if p := c.entries["claude-opus-5-5"]; p == nil || p.Fast != 2 {
+		t.Fatalf("fast multiplier not parsed: %+v", p)
+	}
+	u := providers.Usage{Input: 1000, Output: 500, CacheRead: 2000, CacheWrite: 400, CacheWrite1h: 100}
+	standard := 1000*4e-06 + 500*2e-05 + 2000*2e-07 + 300*5e-06 + 100*8e-06
+	for _, speed := range []string{"", "standard"} {
+		u.Speed = speed
+		if got, _ := c.Cost(providers.KindAnthropic, u, "claude-opus-5-5"); !near(got, standard) {
+			t.Fatalf("speed %q cost = %v, want %v", speed, got, standard)
+		}
+	}
+	// Fast mode is $8/$40 per MTok on Opus 5.5: every rate doubles, caching included.
+	u.Speed = "fast"
+	if got, _ := c.Cost(providers.KindAnthropic, u, "claude-opus-5-5"); !near(got, 2*standard) {
+		t.Fatalf("fast cost = %v, want %v", got, 2*standard)
+	}
+	// Foundry's entry has no multiplier; Anthropic's list price applies.
+	f := providers.Usage{Input: 1000, Output: 500, Speed: "fast"}
+	if got, key := c.Cost(providers.KindAzureFoundry, f, "claude-opus-5-5"); key != "azure_ai/claude-opus-5-5" || !near(got, 2*(1000*4e-06+500*2e-05)) {
+		t.Fatalf("foundry fast cost = %v (%s)", got, key)
+	}
+	// Elsewhere a missing multiplier leaves standard rates rather than guessing.
+	if got, _ := c.Cost(providers.KindBedrock, f, "global.anthropic.claude-opus-5-5"); !near(got, 1000*4e-06+500*2e-05) {
+		t.Fatalf("bedrock fast cost = %v", got)
 	}
 }
 
@@ -217,13 +249,13 @@ func TestRefreshFetchesCatalog(t *testing.T) {
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if st := c.Status(); st.Models != 19 || st.FetchedAt == nil || st.Source != srv.URL {
+	if st := c.Status(); st.Models != 20 || st.FetchedAt == nil || st.Source != srv.URL {
 		t.Fatalf("status: %+v", st)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "nope", 500) }))
 	defer bad.Close()
 	c.url = bad.URL
-	if err := c.Refresh(context.Background()); err == nil || c.Len() != 19 || c.Status().LastError == "" {
+	if err := c.Refresh(context.Background()); err == nil || c.Len() != 20 || c.Status().LastError == "" {
 		t.Fatal("a failed refresh must keep the previous prices and report the error")
 	}
 }

@@ -239,3 +239,84 @@ func TestBedrockDiscoverySkipsProfileOnlyModels(t *testing.T) {
 		t.Fatalf("discovered %v, want %v", got, want)
 	}
 }
+
+// Claude Models on Google Cloud (Anthropic managed): the Claude API at a
+// project/workspace URL with a Google access token instead of an API key.
+func TestAnthropicOnGoogleCloud(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	der, _ := x509.MarshalPKCS8PrivateKey(key)
+	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	var gotPath, gotVersion, gotAPIKey string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			_, _ = w.Write([]byte(`{"access_token":"ya29.claude","expires_in":3600}`))
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer ya29.claude" {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		gotPath, gotVersion, gotAPIKey = r.URL.Path, r.Header.Get("anthropic-version"), r.Header.Get("x-api-key")
+		if strings.HasSuffix(r.URL.Path, "/v1/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5"}],"has_more":false}`))
+			return
+		}
+		gotBody = nil
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"type":"message","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":3,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	creds, _ := json.Marshal(map[string]string{"type": "service_account", "client_email": "sa@p.iam.gserviceaccount.com", "private_key": pemKey, "token_uri": srv.URL + "/token"})
+	f := filepath.Join(t.TempDir(), "sa.json")
+	_ = os.WriteFile(f, creds, 0o600)
+
+	// The default base URL is built from project, location and workspace.
+	p, err := New("anthropic://claude.googleapis.com?auth=service_account&project=my-proj&workspace=wrkspc_01Ab&credentials="+url.QueryEscape(f), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := p.(*Anthropic); a.base != "https://claude.googleapis.com/v1/projects/my-proj/locations/global/workspaces/wrkspc_01Ab/invoke" {
+		t.Fatalf("base %s", a.base)
+	}
+
+	// Requests carry the Google token and the client's anthropic-version.
+	p, err = New("anthropic://claude.googleapis.com?auth=service_account&project=my-proj&workspace=wrkspc_01Ab&credentials="+url.QueryEscape(f)+"&base_url="+url.QueryEscape(srv.URL+"/v1/projects/my-proj/locations/global/workspaces/wrkspc_01Ab/invoke"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr := http.Header{"Anthropic-Version": {"2026-10-21"}}
+	resp, err := p.Send(context.Background(), &Request{Body: map[string]any{"max_tokens": 10, "messages": []any{}}, UpstreamModel: "claude-opus-5-5", Header: hdr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if gotPath != "/v1/projects/my-proj/locations/global/workspaces/wrkspc_01Ab/invoke/v1/messages" || gotVersion != "2026-10-21" || gotAPIKey != "" || gotBody["model"] != "claude-opus-5-5" {
+		t.Fatalf("path=%s version=%s x-api-key=%q body=%v", gotPath, gotVersion, gotAPIKey, gotBody)
+	}
+	models, err := p.ListModels(context.Background())
+	if err != nil || len(models) != 1 || models[0].ID != "claude-opus-5-5" {
+		t.Fatalf("models %v %v", models, err)
+	}
+	if gotPath != "/v1/projects/my-proj/locations/global/workspaces/wrkspc_01Ab/invoke/v1/models" {
+		t.Fatalf("models path %s", gotPath)
+	}
+
+	// A full URL in the host (e.g. a Private Service Connect endpoint) is used as is.
+	p, err = New("anthropic://claude-psc.example.internal/v1/projects/p/locations/global/workspaces/w/invoke?auth=service_account&credentials="+url.QueryEscape(f), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := p.(*Anthropic); a.base != "https://claude-psc.example.internal/v1/projects/p/locations/global/workspaces/w/invoke" {
+		t.Fatalf("host base %s", a.base)
+	}
+	// Project and workspace are required for the default host.
+	if _, err := New("anthropic://claude.googleapis.com?auth=metadata&project=p", Options{}); err == nil || !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("missing workspace: %v", err)
+	}
+	// API-key providers are unchanged.
+	p, err = New("anthropic://api.anthropic.com?api_key=k", Options{})
+	if err != nil || p.(*Anthropic).google != nil {
+		t.Fatalf("api key provider: %v", err)
+	}
+}

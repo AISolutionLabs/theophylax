@@ -14,10 +14,13 @@ const OAUTH_FIELDS = ['token_url', 'client_id', 'client_secret', 'scope']
 
 // Each provider kind offers its auth methods and the fields each needs.
 const KINDS: Record<Kind, { host: string; hostLabel: string; hostHint: string; auths: { value: string; label: string; fields: string[] }[] }> = {
-  anthropic: { host: 'api.anthropic.com', hostLabel: 'Host', hostHint: 'Leave as api.anthropic.com unless you use a proxy.', auths: [
+  anthropic: { host: 'api.anthropic.com', hostLabel: 'Host', hostHint: 'Leave as api.anthropic.com unless you use a proxy. For Claude Models on Google Cloud (Anthropic managed), use claude.googleapis.com and a Google Cloud sign-in.', auths: [
     { value: 'api_key', label: 'API key (x-api-key)', fields: ['api_key'] },
     { value: 'auth_token', label: 'Bearer token', fields: ['auth_token'] },
     { value: 'oauth', label: 'OAuth 2.0', fields: OAUTH_FIELDS },
+    { value: 'metadata', label: 'Google Cloud: GKE workload identity / metadata server', fields: ['project', 'workspace'] },
+    { value: 'workload_identity', label: 'Google Cloud: workload identity federation (EKS, AKS…)', fields: ['project', 'workspace', 'audience', 'token_file', 'service_account'] },
+    { value: 'service_account', label: 'Google Cloud: service account key', fields: ['project', 'workspace', 'credentials'] },
   ] },
   bedrock: { host: 'us-east-1', hostLabel: 'Region', hostHint: 'e.g. us-east-1, eu-west-1, eu-central-1.', auths: [
     { value: 'irsa', label: 'IRSA (EKS service account role)', fields: ['role_arn'] },
@@ -68,7 +71,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').repla
 
 const FIELD_LABEL: Record<string, string> = {
   api_key: 'API key', auth_token: 'Token', role_arn: 'Role ARN', external_id: 'External ID', access_key_id: 'Access key ID', secret_access_key: 'Secret access key',
-  session_token: 'Session token (optional)', project: 'Google Cloud project', audience: 'Audience', token_file: 'Token file', service_account: 'Impersonate service account (optional)',
+  session_token: 'Session token (optional)', project: 'Google Cloud project', workspace: 'Claude workspace ID (wrkspc_…)', audience: 'Audience', token_file: 'Token file', service_account: 'Impersonate service account (optional)',
   credentials: 'Service account key (path or ${file:…})', entra_auth: 'Entra auth (workload, managed or entra)', tenant_id: 'Tenant ID', client_id: 'Client ID', client_secret: 'Client secret', api_version: 'API version', base_url: 'Base URL (optional)',
   username: 'Username', password: 'Password', token: 'Access token', refresh_token: 'Refresh token (optional)', token_url: 'Token URL (optional)', scope: 'Scope (optional)',
 }

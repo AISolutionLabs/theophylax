@@ -18,6 +18,19 @@ anthropic://api.anthropic.com?api_key=${env:ANTHROPIC_API_KEY}
 anthropic://gateway.internal?auth_token=…&base_url=https://gateway.internal
 ```
 
+### Claude Models on Google Cloud (Anthropic managed)
+
+[Claude Models on Google Cloud](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) is the Claude API run by Anthropic, reached through a Google Cloud project, and billed through Google Cloud Marketplace. It is separate from Claude on Vertex AI (`vertex://`). It takes the same body, headers, model IDs (`claude-opus-5-5`) and Models API as the Claude API, but a Google access token replaces the API key and the workspace is part of the URL:
+
+```text
+anthropic://claude.googleapis.com?auth=metadata&project=my-proj&workspace=wrkspc_01AbCd        # GKE workload identity
+anthropic://claude.googleapis.com?auth=workload_identity&project=my-proj&workspace=wrkspc_01AbCd&audience=//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/eks/providers/eks&token_file=/var/run/secrets/eks.amazonaws.com/serviceaccount/token&service_account=gateway@my-proj.iam.gserviceaccount.com
+anthropic://claude.googleapis.com?auth=service_account&project=my-proj&workspace=wrkspc_01AbCd&credentials=${file:/secrets/sa.json}
+anthropic://claude.googleapis.com?auth=google&project=my-proj&workspace=wrkspc_01AbCd          # GOOGLE_APPLICATION_CREDENTIALS, else the metadata server
+```
+
+The credential options are the same as for Vertex. The identity needs `roles/claude.user`. The gateway calls `https://claude.googleapis.com/v1/projects/{project}/locations/{location}/workspaces/{workspace}/invoke/v1/messages`, where `location` defaults to `global`. To use another endpoint, such as Private Service Connect, put the full `…/invoke` URL in the host or in `base_url`. Model discovery and `count_tokens` work as they do on the Claude API. Requests are priced at Claude API list prices; check them against your Marketplace billing.
+
 ## AWS Bedrock
 
 ```text

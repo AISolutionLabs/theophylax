@@ -22,7 +22,8 @@ import (
 
 const googleScope = "https://www.googleapis.com/auth/cloud-platform"
 
-// googleToken obtains OAuth access tokens for Google Cloud (Vertex AI).
+// googleToken obtains OAuth access tokens for Google Cloud (Vertex AI and
+// Claude Models on Google Cloud).
 //
 //	auth=service_account   credentials=<path or JSON>   (a service account key file)
 //	auth=metadata          GCE / GKE workload identity metadata server
@@ -97,7 +98,7 @@ func newGoogleToken(c *Conn, client *http.Client) (*googleToken, error) {
 		if creds == "" {
 			aud, tf := c.Get("audience"), c.Get("token_file")
 			if aud == "" || tf == "" {
-				return nil, errors.New("vertex workload_identity requires audience and token_file (or credentials= an external_account file)")
+				return nil, errors.New("google workload_identity requires audience and token_file (or credentials= an external_account file)")
 			}
 			f := &googleCredFile{Type: "external_account", Audience: aud, SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt"}
 			f.CredentialSource.File = tf
@@ -109,10 +110,10 @@ func newGoogleToken(c *Conn, client *http.Client) (*googleToken, error) {
 		}
 	case "", "default", "service_account", "json":
 	default:
-		return nil, fmt.Errorf("unknown vertex auth %q", mode)
+		return nil, fmt.Errorf("unknown google auth %q", mode)
 	}
 	if creds == "" {
-		return nil, errors.New("vertex service_account auth requires credentials (a key file path or JSON)")
+		return nil, errors.New("google service_account auth requires credentials (a key file path or JSON)")
 	}
 	raw := []byte(creds)
 	if !strings.HasPrefix(strings.TrimSpace(creds), "{") {

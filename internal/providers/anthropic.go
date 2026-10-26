@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -14,6 +15,13 @@ import (
 //	anthropic://api.anthropic.com?api_key=sk-ant-...         (x-api-key)
 //	anthropic://gateway.internal?auth_token=...&base_url=..   (Authorization: Bearer)
 //	azure-foundry://<resource>.services.ai.azure.com?auth=api_key|entra|workload|managed
+//
+// Claude Models on Google Cloud (Anthropic managed) is the same API at a
+// project- and workspace-scoped URL, authenticated with a Google access token:
+//
+//	anthropic://claude.googleapis.com?auth=metadata&project=my-proj&workspace=wrkspc_…
+//	anthropic://claude.googleapis.com?auth=workload_identity&project=…&workspace=…&audience=…&token_file=…
+//	anthropic://claude.googleapis.com?auth=service_account&project=…&workspace=…&credentials=${file:/secrets/sa.json}
 type Anthropic struct {
 	baseProvider
 	base     string
@@ -21,12 +29,24 @@ type Anthropic struct {
 	bearer   string
 	azure    *azureToken
 	azureKey string
+	google   *googleToken
 	version  string
 	// external: credentials are added by the HTTP transport (custom providers).
 	external bool
 }
 
+// googleClaudeHost serves Claude Models on Google Cloud (Anthropic managed).
+const googleClaudeHost = "claude.googleapis.com"
+
+// googleAuthModes select Google credentials for an anthropic:// provider;
+// "google" means Application Default Credentials.
+var googleAuthModes = map[string]bool{"google": true, "gcp": true, "metadata": true, "gke": true, "gce": true,
+	"workload_identity": true, "federated": true, "external_account": true, "service_account": true}
+
 func newAnthropic(b baseProvider, c *Conn) (*Anthropic, error) {
+	if googleAuthModes[strings.ToLower(c.Get("auth"))] {
+		return newAnthropicGoogle(b, c)
+	}
 	p := &Anthropic{baseProvider: b, version: c.Get("anthropic_version")}
 	p.base = strings.TrimRight(c.Get("base_url"), "/")
 	if p.base == "" {
@@ -40,6 +60,44 @@ func newAnthropic(b baseProvider, c *Conn) (*Anthropic, error) {
 	p.bearer = c.Get("auth_token")
 	if p.apiKey == "" && p.bearer == "" {
 		return nil, fmt.Errorf("anthropic: api_key or auth_token is required")
+	}
+	return p, nil
+}
+
+func newAnthropicGoogle(b baseProvider, c *Conn) (*Anthropic, error) {
+	gc := &Conn{Kind: c.Kind, Host: c.Host, Params: make(map[string]string, len(c.Params))}
+	for k, v := range c.Params {
+		gc.Params[k] = v
+	}
+	if m := strings.ToLower(c.Get("auth")); m == "google" || m == "gcp" {
+		gc.Params["auth"] = "default"
+	}
+	tok, err := newGoogleToken(gc, b.client)
+	if err != nil {
+		return nil, err
+	}
+	p := &Anthropic{baseProvider: b, version: c.Get("anthropic_version"), google: tok}
+	p.base = strings.TrimRight(c.Get("base_url"), "/")
+	if p.base == "" {
+		if host := c.Host; host != "" && host != "api.anthropic.com" && host != googleClaudeHost {
+			p.base = "https://" + strings.TrimRight(host, "/")
+			return p, nil
+		}
+		project, ws := c.Get("project"), c.Get("workspace")
+		if project == "" {
+			project = c.Get("project_id")
+		}
+		if ws == "" {
+			ws = c.Get("workspace_id")
+		}
+		if project == "" || ws == "" {
+			return nil, fmt.Errorf("anthropic on Google Cloud: project= and workspace= are required")
+		}
+		loc := c.Get("location")
+		if loc == "" {
+			loc = "global"
+		}
+		p.base = "https://" + googleClaudeHost + "/v1/projects/" + url.PathEscape(project) + "/locations/" + url.PathEscape(loc) + "/workspaces/" + url.PathEscape(ws) + "/invoke"
 	}
 	return p, nil
 }
@@ -70,6 +128,12 @@ func (p *Anthropic) Format() Format { return FormatAnthropic }
 func (p *Anthropic) auth(ctx context.Context, req *http.Request) error {
 	switch {
 	case p.external:
+	case p.google != nil:
+		t, err := p.google.Get(ctx)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+t)
 	case p.azure != nil:
 		t, err := p.azure.Get(ctx)
 		if err != nil {

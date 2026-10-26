@@ -1070,6 +1070,12 @@ func (g *Gateway) Judge(ctx context.Context, model, system, user string) (string
 			nb = providers.AnthropicToOpenAIRequest(body)
 		}
 		resp, err := d.Provider.P.Send(ctx, &providers.Request{Body: nb, UpstreamModel: d.Upstream(model), Header: http.Header{}})
+		if rejectsTemperature(err) {
+			// Claude 4.7+ (and some OpenAI reasoning models) accept only the
+			// default sampling settings: retry once at the model's default.
+			nb = withoutKey(nb, "temperature")
+			resp, err = d.Provider.P.Send(ctx, &providers.Request{Body: nb, UpstreamModel: d.Upstream(model), Header: http.Header{}})
+		}
 		if err != nil {
 			lastErr = err
 			continue
@@ -1100,6 +1106,23 @@ func (g *Gateway) Judge(ctx context.Context, model, system, user string) (string
 		lastErr = fmt.Errorf("no deployment available for judge model")
 	}
 	return "", lastErr
+}
+
+// rejectsTemperature reports whether an upstream 400 complains about the
+// temperature parameter.
+func rejectsTemperature(err error) bool {
+	var ue *providers.UpstreamError
+	return errors.As(err, &ue) && ue.Status == http.StatusBadRequest && bytes.Contains(bytes.ToLower(ue.Body), []byte("temperature"))
+}
+
+func withoutKey(m map[string]any, k string) map[string]any {
+	out := make(map[string]any, len(m))
+	for key, v := range m {
+		if key != k {
+			out[key] = v
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

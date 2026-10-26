@@ -123,3 +123,59 @@ Window: 2026-10-02 to 2026-10-12.
 - **golang.org/x/net** advisory (2026-10-08). **(d)** x/net is not a dependency.
 - **pgx:** no advisories.
 - **npm:** no new advisories for vite 8.3, React 19.3 or TypeScript. Vite shipped backport releases on 2026-10-06/08 (8.3.3/8.3.4) with no advisory published. Dependabot (#21) covers the console group.
+
+## 2026-10-26
+
+Window: 2026-10-16 to 2026-10-26. The 2026-10-19 entry is in #53, which was still open when this run started.
+
+### Anthropic
+
+- **API version `2026-10-21`** (2026-10-21), the first new version since `2023-06-01`, which is not deprecated. [Release notes](https://platform.claude.com/docs/en/release-notes/overview), [migration guide](https://platform.claude.com/docs/en/api/migration-2026-10-21)
+  - Messages, count_tokens and Batches return 400 for `temperature`, `top_p` and `top_k` (even at defaults), for `document` blocks in assistant messages, and for non-empty `citations` on user text blocks. Response shapes are unchanged.
+  - The new SDKs (Python 2.0, TypeScript 1.0, Go 2.0, and the rest) send `anthropic-version: 2026-10-21` and `Authorization: Bearer` instead of `X-Api-Key`.
+  - On Bedrock the new version is only for Claude 4.7 and later.
+  - **(a)** The gateway accepts keys from `Authorization: Bearer`, forwards the client's `anthropic-version` on `/v1/messages` to Anthropic and Foundry, and keeps the platform body versions on Bedrock and Vertex. **(c) Done:** api.md documents this, and warns against pinning `anthropic_version=2026-10-21` on a provider that OpenAI-format clients reach with sampling parameters.
+  - **(b) Done (#55):** the guardrail/complexity/rollout judge always sent `temperature: 0`. Claude 4.7 and later reject non-default sampling values, so any judge on Haiku 5.5, Sonnet 5.5 or Opus 5.5 failed every call. The judge now retries once without `temperature` when the upstream rejects it.
+  - Admin API field renames (`role_ids`, `rbac_group_id`, `scope` on API keys, and others). **(d)** The gateway does not call the Admin API.
+- **Claude Models on Google Cloud (Anthropic managed)** (2026-10-22): the Claude API operated by Anthropic, at `https://claude.googleapis.com/v1/projects/{project}/locations/global/workspaces/{workspace}/invoke`, authenticated with a Google OAuth access token (no API keys) and billed through Google Cloud Marketplace. Same body, headers, streaming, model IDs and Models API as the Claude API. [Docs](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed)
+  - **(b) Done (draft #56):** `anthropic://` gains Google Cloud auth (`auth=metadata|workload_identity|service_account|google`, plus `project` and `workspace`), reusing the Vertex credential code. Requests are priced at Claude API list prices; Marketplace billing in Claude Consumption Units is assumed to match, which is not confirmed.
+- **Fast mode for Opus 5.5** on the Google Cloud offering (2026-10-22). **(a)** Covered by the fast-mode pricing in #53.
+- Models API `capabilities.thinking.types.between_tools` (2026-10-15). **(a)** Discovery reads only `id` and `display_name`.
+- User profiles, enforcement fields, organization webhooks beta (`webhooks-2026-10-07`), Claude Tag API beta, inference hooks GA, web fetch org toggle (a request with the web fetch tool now returns 400 when an org turns it off), Managed Agents web restrictions, OpenTelemetry export beta. **(d)** Not gateway surfaces. Per-end-customer user profiles could later map to Theophylax principals; not adopted.
+- No new models, content block types, streaming events or deprecations in the window.
+
+### AWS Bedrock
+
+- **Structured outputs for Claude** on `bedrock-runtime` and `bedrock-mantle` (2026-10-18). **(a)** `output_config`/`output_format` pass through in the InvokeModel body. [Document history](https://docs.aws.amazon.com/bedrock/latest/userguide/doc-history.html)
+- Advanced Prompt Optimization, agentic retrieval instructions, Guardrails grounding tiers. **(d)**
+- `2026-10-21` on Bedrock is limited to Claude 4.7+ (see Anthropic). Mantle is unchanged and still waiting on a decision.
+
+### Google Vertex AI / Gemini
+
+- Gemini API changelog: no entries after 2026-10-13 (Gemini 4 Argon, logged last week). [Changelog](https://ai.google.dev/gemini-api/docs/changelog)
+- No changes for Claude on Vertex. The Anthropic-managed Google Cloud offering is separate from Vertex (see Anthropic).
+
+### Azure
+
+- No new Azure OpenAI api-version or retirement notice found in the window. The Foundry retirements logged on 2026-10-19 still apply: `claude-haiku-4-5` on **2026-11-15**, `claude-opus-4-5` on 2026-11-24, `claude-sonnet-4-5` on 2026-11-30.
+
+### OpenAI
+
+- **12-hour prompt caching** on `v1/responses` (2026-10-20), with cache writes billed at 2.5× input. **Watch:** the gateway prices OpenAI usage from `input_tokens_details.cached_tokens` and has no OpenAI cache-write rate; check the response usage fields and catalog keys once the parameter is documented. [Changelog](https://developers.openai.com/api/docs/changelog)
+- Decisions API GA, project service-tier restrictions, prompt-to-voice, GPT-Live voices, Agents API ultrafast. **(d)**
+- No new deprecations, Responses events or item types.
+- **Codex CLI 0.164.0** (2026-10-23): proxy Negotiate/NTLM auth on Windows. No wire changes. `incremental_tools` is still not the default. **(d)**
+
+### Competitors
+
+- **LiteLLM 1.107.0 supply-chain compromise** (2026-10-21). Malicious wheels and images on PyPI, Docker Hub and GHCR carried a credential stealer. The attacker held an org-owner GitHub token from 2026-10-10 and overrode branch protection. [Datadog](https://securitylabs.datadoghq.com/articles/litellm-compromised-pypi-docker/), [The Hacker News](https://thehackernews.com/2026/10/leaked-litellm-master-key-let-attackers.html)
+  - Theophylax runs no LiteLLM code, but **its default price catalog is `BerriAI/litellm` `main` fetched live**, so a tampered catalog could zero or inflate prices and with them budgets. Reports name no change to the catalog file. **Needs a decision:** pin `THEOPHYLAX_PRICING_URL` to a reviewed commit or mirror, or add a sanity check that rejects a refresh that drops or zeroes prices for models already priced.
+  - The `theophylax import litellm` migration reads LiteLLM's config and database only; no LiteLLM code runs.
+- **Bifrost v2.3.2** (2026-10-20): Go 1.27.3 for CVE-2026-111943. Matched by this run.
+- **Portkey:** no release found.
+
+### Security
+
+- **Go 1.27.3 / 1.26.10** (2026-10-19): CVE-2026-111943, `crypto/x509` stops trusting a set of intermediates from one CA. It affects the gateway's outbound TLS to providers, IdPs and MCP servers. **(b) Done:** toolchain go1.27.3 (#54). The Docker build image `golang:1.27-alpine` follows the patch release. [Announcement](https://groups.google.com/g/golang-announce/c/66pojueaQek/m/tmWX2Pq9AgAJ)
+- **pgx, x/text:** no new advisories. Dependabot #51 (x/text v0.43.0) is still open.
+- **npm (vite, React, TypeScript):** no new advisories in the window. Dependabot #49 and #52 are still open.

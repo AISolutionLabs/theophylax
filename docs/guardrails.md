@@ -37,7 +37,7 @@ The native engine scores each new user message and tool result (or the whole con
 2. **Detector families** — instruction override, jailbreak personas, role hijack, system-prompt extraction, chat-template/delimiter injection, tool/agent hijack (`curl … | sh`, `rm -rf`, encoded shells), data exfiltration (including markdown-image beacons), secrecy toward the user, and multilingual overrides (ES, FR, DE, PT, IT, ZH, JA, RU, KO).
 3. **Indirect injection** — tool results are untrusted: weights are raised and extra detectors look for text addressed to the AI ("Note to the assistant: …").
 4. **Scores** combine with noisy-OR into 0–1 risk with named categories. Default threshold 0.5.
-5. **Judge** — `detector: hybrid` sends only grey-zone texts to a model you choose (routed through the gateway); `judge` classifies every scan. A confident "safe" verdict clears grey-zone false positives.
+5. **Judge** — `detector: hybrid` sends only grey-zone texts to a model you choose (routed through the gateway); `judge` classifies every scan. A confident "safe" verdict clears grey-zone false positives. The judge asks for `temperature: 0`; models that accept only default sampling (Claude 4.7 and later) are retried once at their default.
 
 Post-call defences on the same rule:
 

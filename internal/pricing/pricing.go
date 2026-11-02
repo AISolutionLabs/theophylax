@@ -55,6 +55,9 @@ type Price struct {
 	Provider string `json:"provider"`
 	Rates    Rates  `json:"rates"`
 	Tiers    []Tier `json:"tiers,omitempty"`
+	// Fast is the multiplier applied to every rate when Claude runs in fast
+	// mode (usage.speed "fast"), from the catalog's provider_specific_entry.
+	Fast float64 `json:"fast_multiplier,omitempty"`
 	// Model metadata used by model watch (context, limits, lifecycle).
 	MaxInput     int      `json:"max_input,omitempty"`
 	MaxOutput    int      `json:"max_output,omitempty"`
@@ -274,6 +277,11 @@ func Parse(raw []byte) (map[string]*Price, error) {
 		p.Provider, _ = fields["litellm_provider"].(string)
 		p.Mode, _ = fields["mode"].(string)
 		p.Deprecation, _ = fields["deprecation_date"].(string)
+		if pse, ok := fields["provider_specific_entry"].(map[string]any); ok {
+			if f, ok := pse["fast"].(float64); ok && f > 0 {
+				p.Fast = f
+			}
+		}
 		if f, ok := fields["max_input_tokens"].(float64); ok {
 			p.MaxInput = int(f)
 		}
@@ -437,14 +445,26 @@ func overlay(base, o Rates) Rates {
 // Cost is the exact list-price cost of a usage record. Rates the catalog
 // omits fall back to the next most specific listed rate (1h write → write,
 // cache read/write → input), never to an invented multiplier.
+//
+// Fast-mode usage is billed at the catalog's fast multiplier on every rate
+// (prompt caching multipliers stack on top). An entry without a multiplier
+// prices fast usage at standard rates.
 func (p *Price) Cost(u providers.Usage) float64 {
+	return p.cost(u, p.Fast)
+}
+
+func (p *Price) cost(u providers.Usage, fast float64) float64 {
 	r := p.Effective(u.Input + u.CacheRead + u.CacheWrite)
 	in := deref(r.Input)
 	cr, cw := or(r.CacheRead, in), or(r.CacheWrite, in)
 	cw1h := or(r.CacheWrite1h, cw)
 	w1h := min(u.CacheWrite1h, u.CacheWrite)
-	return float64(u.Input)*in + float64(u.Output)*deref(r.Output) + float64(u.CacheRead)*cr +
+	usd := float64(u.Input)*in + float64(u.Output)*deref(r.Output) + float64(u.CacheRead)*cr +
 		float64(u.CacheWrite-w1h)*cw + float64(w1h)*cw1h
+	if u.Speed == "fast" && fast > 0 {
+		usd *= fast
+	}
+	return usd
 }
 
 // Quote returns the base rates per million tokens.
@@ -466,7 +486,15 @@ func (c *Catalog) Cost(kind string, u providers.Usage, ids ...string) (usd float
 	if p == nil {
 		return 0, ""
 	}
-	return p.Cost(u), p.Key
+	fast := p.Fast
+	if u.Speed == "fast" && fast == 0 && kind == providers.KindAzureFoundry {
+		// Foundry bills Claude at Anthropic's list price, fast mode included,
+		// but its catalog entries carry no fast multiplier.
+		if a := c.Lookup(providers.KindAnthropic, ids...); a != nil {
+			fast = a.Fast
+		}
+	}
+	return p.cost(u, fast), p.Key
 }
 
 // QuoteFor returns per-million rates for a kind and upstream ID, or nil.

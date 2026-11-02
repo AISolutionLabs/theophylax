@@ -751,6 +751,9 @@ func (g *Gateway) streamResponse(w http.ResponseWriter, r *http.Request, resp *h
 					if u.CacheWrite > 0 {
 						usage.CacheWrite, usage.CacheWrite1h = u.CacheWrite, u.CacheWrite1h
 					}
+					if u.Speed != "" {
+						usage.Speed = u.Speed
+					}
 				}
 			case "content_block_delta":
 				if wantText {

@@ -58,6 +58,12 @@ Evidence: `/api/orgs/{org}/logs`, `/api/logs/{id}`, `/api/orgs/{org}/usage` (`da
 
 Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject forced tool use. When `/v1/chat/completions` or `/v1/responses` runs on one of them, `tool_choice: "required"` or a named function is translated to Anthropic's `any`/`tool` as usual and the upstream returns 400; the gateway does not silently downgrade it to `auto`. Clients (for example the Agents SDK with a required tool) should send `auto` for these models (Anthropic recommends `auto` with strict tool use), or be routed to an earlier model.
 
+### Anthropic API version 2026-10-21
+
+The 2026-10 Anthropic SDKs (Python 2.x, TypeScript 1.x, Go 2.x and the rest) send `anthropic-version: 2026-10-21` and their key as `Authorization: Bearer`. Both work against the gateway unchanged: keys are accepted from `x-api-key` or `Authorization: Bearer`, and on `/v1/messages` the client's `anthropic-version` is forwarded to Anthropic and Azure AI Foundry deployments. Bedrock and Vertex deployments keep their own body version (`bedrock-2023-05-31`, `vertex-2023-10-16`), which accepts everything a 2026-10-21 request can contain.
+
+Under 2026-10-21, `temperature`, `top_p` and `top_k` return 400 even at their defaults, and so do `document` blocks in assistant messages and `citations` on user text. The gateway does not add any of these. `/v1/chat/completions` and `/v1/responses` call Claude with `2023-06-01` (or the provider's `anthropic_version` option) and forward `temperature`/`top_p` only when the client sets them, so don't set `anthropic_version=2026-10-21` on a provider that OpenAI-format clients reach with sampling parameters.
+
 Errors use the Anthropic envelope `{"type":"error","error":{"type":"…","message":"…"}}` (OpenAI envelope on OpenAI endpoints).
 
 ## Message batches

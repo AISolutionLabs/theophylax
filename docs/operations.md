@@ -14,7 +14,7 @@
 | `THEOPHYLAX_LOG_RETENTION_DAYS` | `90` | Request logs and payloads |
 | `THEOPHYLAX_STDOUT_REQUEST_LOGS` | `true` | One JSON line per request |
 | `THEOPHYLAX_UPSTREAM_TIMEOUT` | `10m` | Per-provider override in provider options |
-| `THEOPHYLAX_MAX_BODY_MB` | `32` | Request size limit |
+| `THEOPHYLAX_MAX_BODY_MB` | `32` | Request size limit for every endpoint and provider. The Claude API accepts up to 128 MB on Messages and count_tokens; raise this to allow larger requests, at the cost of holding each body in memory. Bedrock, Vertex and OpenAI-format providers have their own limits |
 | `THEOPHYLAX_BATCH_WORKERS` | `4` | [Message batch](api.md#message-batches) requests this replica runs at once; `0` disables batch processing on it |
 | `THEOPHYLAX_BATCH_MAX_MB` | `64` | Size limit for one message batch |
 | `THEOPHYLAX_KEY_CACHE_TTL` | `30s` | Revocation propagation across replicas |

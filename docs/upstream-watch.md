@@ -316,3 +316,104 @@ Window: 2026-10-23 to 2026-11-02. The 2026-10-19 and 2026-10-26 entries were mov
 - **golang.org/x/net** GO-2026-6860 and GO-2026-6866 (2026-10-27) affect `x/net/html`. **(d)** x/net is not a dependency.
 - **pgx:** no new advisories.
 - **npm:** GitHub reports 9 open Dependabot alerts on the default branch (1 high, 8 moderate). The console on `main` is still on vite 5.4. Merging the vite 8 bump (#57, now fixed to build, or #49) clears the vite/esbuild alerts. #52 (the console group, including React 19 and TypeScript 7) also passes CI.
+
+## 2026-11-09
+
+Window: 2026-10-30 to 2026-11-09.
+
+**Coverage gaps this run.** The fetch tool could not read these pages, so they are **not reviewed** and next week's run should cover them for this window too:
+
+- the Claude release notes
+- the Bedrock document history
+- the Gemini API changelog
+- the Agent Platform release notes
+- the Azure retirement schedule
+
+The findings below come from the pages it could read. The Go toolchain could not be downloaded either (go1.27.2 from proxy.golang.org was blocked, and the local Go is 1.24), so no code change could be built or tested. This run therefore opened no code PRs.
+
+### Anthropic
+
+- **Model deprecations page** ([deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations)):
+  - No new notices. The latest entry is still 2026-09-30: `claude-sonnet-4-5-20250929` retires on **2026-11-30**.
+  - `claude-haiku-4-5-20251001` is still Active with no notice. Under the 60-day policy it cannot retire before early January 2027.
+  - `claude-opus-4-5-20251101` is Active ("not sooner than 2026-11-24"), with no notice.
+- **Models overview:** no new model IDs. The current models are `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`, plus `claude-mythos-5-1`. **(a)**
+- **Beta headers page:** nothing new. The newest is still `agent-memory-2026-07-22`. **(a)**
+- **Watermark rumour (2026-11-01 entry): not confirmed.** The [text watermark docs](https://platform.claude.com/docs/en/build-with-claude/text-watermark) give no dates and no API fields, and say requests need no changes. **(d)**
+- **Not reviewed:** release-note entries in the window (new SSE events, content blocks, tool types, stop reasons, usage fields).
+
+### AWS Bedrock
+
+- [What's New](https://aws.amazon.com/about-aws/whats-new/recent/feed/) has no Claude, InvokeModel, inference-profile, auth or Mantle items in the window. **(d)** for the window's entries:
+  - Kimi K3.1 Pro (11-06)
+  - AgentCore Web Answer (11-05)
+  - OpenAI models in GovCloud (10-30)
+- The document history was not reviewed.
+- Mantle is still waiting on a decision.
+
+### Google Vertex AI / Gemini
+
+- The [Vertex AI release notes](https://docs.cloud.google.com/vertex-ai/docs/release-notes) have only Workbench maintenance entries in the window. **(d)**
+- The [Gemini deprecations page](https://ai.google.dev/gemini-api/docs/deprecations) is unchanged since 2026-10-22. TTS and live previews shut down on 2026-11-17. **(d)**
+- Not reviewed: the Gemini API changelog and the Agent Platform release notes.
+
+### Azure
+
+- The [Claude in Foundry page](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/claude-models) is unchanged since 2026-09-22.
+- The main retirement schedule was not reviewed. The dates logged on 2026-10-19 are assumed to still hold:
+  - `claude-haiku-4-5` on **2026-11-15**
+  - `claude-opus-4-5` on 2026-11-24
+  - `claude-sonnet-4-5` on 2026-11-30
+  - Azure OpenAI `o1`/`o3`/`o3-pro`/`o4-mini`/`o3-mini` on 2026-11-19
+  - `codex-mini` on 2026-11-15
+- The Azure Government schedule also still lists `o3-mini` retiring on 2026-11-19.
+
+### OpenAI
+
+- **12-hour prompt caching is now documented** in the [prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching), which is undated. This resolves the **Watch** item from 2026-10-26.
+  - The request parameter is `prompt_cache_options.ttl` (`"30m"`, the default, or `"12h"`). It applies to the Responses API on GPT-5.6 and later, and a breakpoint can override it with `prompt_cache_breakpoint.ttl`.
+  - Usage reports `input_tokens_details.cache_write_tokens` next to `cached_tokens`.
+  - Cache writes are billed at 1.25× input for 30m and 2.5× for 12h; reads at 0.1×, or 0.05× for GPT-6.1 Sol/Terra.
+  - **(b), deferred:** `parseAnyUsage` (internal/gateway/relay.go) and the OpenAI translators read only `cached_tokens`, so cache writes are billed as plain input. That undercounts spend and budgets by 25% to 150% of the written tokens.
+  - The fix is to map `cache_write_tokens` to `Usage.CacheWrite`, subtract it from `Input`, and price it at the catalog's cache-creation rate (or 1.25×/2.5× input when the catalog has no key for it).
+  - It was not implemented because no Go toolchain was available to test it, and it is unconfirmed whether the LiteLLM catalog carries an OpenAI cache-write key. Next run.
+- New models:
+  - `gpt-6-cyber` (11-05)
+  - `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` (11-04, images endpoints; SVG/GIF output)
+  - **(a)** Discovered and priced through the catalog. [Changelog](https://developers.openai.com/api/docs/changelog)
+- Agents API (10-30): background compaction is now the default (`compaction.async`); also new are `experimental.time_awareness` and `review: "auto_review"`. Outbound SIP on the Live API (11-02). **(d)** These are not gateway surfaces.
+- **Deprecation:** `gpt-5.5-cyber-preview` shuts down on 2027-02-01 (announced 11-05). **(a)** [Deprecations](https://developers.openai.com/api/docs/deprecations)
+- No new Responses streaming events or item types.
+- **Codex:**
+  - 0.165.0 (Oct 27) adds GPT-6.1 Terra to the model catalog and has no wire change. **(d)**
+  - [openai/codex#59832](https://github.com/openai/codex/pull/59832) (merged 11-06) adds a separate `incremental_tools_legacy` flag, off by default. It carries tool declarations and updates in conversation history as `additional_tools` items.
+  - **Watch:** if it becomes the default, the Responses→Messages bridge must fold `additional_tools` items into `tools`.
+  - `incremental_tools` still applies only to Responses Lite.
+- Agents SDK: 0.25.0 is not released yet. Its open release PR has no Responses wire changes. **(d)**
+
+### Competitors
+
+- **LiteLLM** ([release notes](https://docs.litellm.ai/release_notes/)):
+  - v1.108.0 stable (11-04): shared Azure PTU capacity across teams, `/v1/live/sessions`, and count routes return the provider's error instead of a local estimate.
+  - v1.108.1 (11-05): Bedrock guardrail traces counted in spend.
+  - v1.108.2 (11-06): an empty `api_key` no longer falls back to the admin key, and Bedrock service tiers are enforced.
+  - Nothing adopted. Count routes are relevant: Theophylax estimates `count_tokens` for non-Anthropic providers on purpose, so that stays.
+  - Still no statement on the integrity of the price catalog file. **The decision from 2026-10-26 (pin `THEOPHYLAX_PRICING_URL` or sanity-check refreshes) is still open.**
+- **Bifrost**, **Portkey:** no release found in the window. This is unverified, because the GitHub release pages may have been stale.
+
+### Security
+
+- **Go 1.27.4 / 1.26.11 are pre-announced for 2026-11-10**, with private security fixes for 12 CVEs (CVE-2026-97033 to -97043 and -97054) in the standard library and toolchain. The affected packages are not yet named. [oss-security](https://www.openwall.com/lists/oss-security/2026/11/05/13) **(b), next run:** bump the `toolchain` line to go1.27.4 once it is released.
+- **pgx:** no advisories. Dependabot #59 bumps it to v5.12.0, a minor release with no advisory.
+- **npm:** no new advisories in the window for vite, React, TypeScript, @vitejs/plugin-react or esbuild. Downstream repos cite two vite advisories, GHSA-8g5g-mxqh-grgj (fixed in 6.4.5) and GHSA-587h-7wmj-h5pm, which could not be opened. If they apply to vite 5.4, the console on `main` is affected; #57 (vite 8.3.5) would clear them.
+
+### Backlog
+
+- These upstream-watch PRs are still open, unmerged:
+  - #53 fast-mode billing
+  - #54 Go 1.27.3
+  - #55 judge temperature retry
+  - #56 Claude on Google Cloud (draft)
+  - #58 log
+- This entry is stacked on #58 for the same reason as before: each log PR appends to this file.
+- **Timing:** #54's toolchain bump will be superseded by go1.27.4. Merging #54 now still closes CVE-2026-111943.

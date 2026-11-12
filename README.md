@@ -108,6 +108,7 @@ Providers, models and routing come from `model_list`; organizations, teams, memb
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md): install, first provider and key, client setup and a production checklist
 - [Architecture](docs/architecture.md)
 - [Connection strings & provider auth](docs/providers.md)
 - [Guardrails, Secret Shield & prompt injection](docs/guardrails.md)
@@ -119,6 +120,8 @@ Providers, models and routing come from `model_list`; organizations, teams, memb
 - [Complexity routing](docs/routing.md)
 - [API reference](docs/api.md)
 - [Benchmarks vs LiteLLM and Portkey](bench/README.md)
+
+The same pages are published as a website by the [Pages workflow](.github/workflows/pages.yml); see [site/README.md](site/README.md).
 
 ## Community
 

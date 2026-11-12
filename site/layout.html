@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Theophylax</title>
+{{with .Description}}<meta name="description" content="{{.}}">{{end}}
+<meta property="og:title" content="{{.Title}} · Theophylax">
+<link rel="icon" href="{{.Root}}assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{{.Root}}assets/style.css">
+</head>
+<body class="doc">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+  <a class="brand" href="{{.Root}}index.html"><img src="{{.Root}}assets/favicon.svg" alt="" width="22" height="22"> Theophylax</a>
+  <nav class="toplinks">
+    <a href="getting-started.html">Get started</a>
+    <a href="api.html">API</a>
+    <a href="{{.RepoURL}}" rel="noopener">GitHub</a>
+  </nav>
+</header>
+<div class="docgrid">
+  <aside class="sidebar">
+    <details class="navwrap" open>
+      <summary>Documentation</summary>
+      <nav aria-label="Documentation">
+        <ul>
+        {{range .Nav}}<li><a href="{{.File}}"{{if eq .File $.Current}} aria-current="page"{{end}}>{{.Title}}</a></li>
+        {{end}}</ul>
+        <p class="navhead">Project</p>
+        <ul>
+          <li><a href="{{.RepoURL}}/blob/main/README.md" rel="noopener">README</a></li>
+          <li><a href="{{.RepoURL}}/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a></li>
+          <li><a href="{{.RepoURL}}/blob/main/SECURITY.md" rel="noopener">Security policy</a></li>
+          <li><a href="{{.RepoURL}}/releases" rel="noopener">Releases</a></li>
+        </ul>
+      </nav>
+    </details>
+  </aside>
+  <main id="content" class="prose">
+    <h1>{{.Title}}</h1>
+    {{.Content}}
+    <footer class="docfoot">
+      <a href="{{.EditURL}}" rel="noopener">Edit this page on GitHub</a>
+      <span>Theophylax is Apache 2.0 licensed.</span>
+    </footer>
+  </main>
+  {{if .Outline}}<aside class="outline" aria-label="On this page">
+    <p class="navhead">On this page</p>
+    <ul>
+    {{range .Outline}}<li class="l{{.Level}}"><a href="#{{.ID}}">{{.Text}}</a></li>
+    {{end}}</ul>
+  </aside>{{end}}
+</div>
+<script src="{{.Root}}assets/site.js" defer></script>
+</body>
+</html>

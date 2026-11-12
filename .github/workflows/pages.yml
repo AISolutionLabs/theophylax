@@ -1,0 +1,62 @@
+name: Pages
+
+# Builds the documentation site from docs/ and site/ and publishes it to
+# GitHub Pages. Pull requests build and check links but do not deploy.
+# One-time setup: Settings → Pages → Build and deployment → Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "site/**", ".github/workflows/pages.yml"]
+  pull_request:
+    paths: ["docs/**", "site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: site/gen/go.mod
+          cache: false   # standard library only; there is no go.sum to key a cache on
+      - name: Test the generator
+        working-directory: site/gen
+        run: |
+          test -z "$(gofmt -l .)" || (gofmt -l .; exit 1)
+          go vet ./...
+          go test ./...
+      - name: Render docs/ and site/ into _site (fails on broken links between pages)
+        working-directory: site/gen
+        run: go run . -repo "${{ github.server_url }}/${{ github.repository }}" -docs ../../docs -site .. -out ../../_site
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

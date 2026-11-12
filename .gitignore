@@ -10,3 +10,6 @@ web/dist/*
 # benchmark outputs
 bench/results/
 bench/loadgen-bin
+
+# GitHub Pages build output (site/README.md)
+/_site/

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theophylax · open-source AI gateway</title>
+<meta name="description" content="Open-source AI gateway: every model call governed, every decision on the record. One endpoint for Claude Code, Codex CLI and the Anthropic and OpenAI SDKs across Anthropic, Bedrock, Vertex, Azure and OpenAI-compatible models.">
+<meta property="og:title" content="Theophylax · open-source AI gateway">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="home">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+  <a class="brand" href="index.html"><img src="assets/favicon.svg" alt="" width="22" height="22"> Theophylax</a>
+  <nav class="toplinks">
+    <a href="docs/getting-started.html">Get started</a>
+    <a href="docs/architecture.html">Docs</a>
+    <a href="{{.RepoURL}}" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<main id="content">
+  <section class="hero">
+    <p class="eyebrow">Open source · Apache 2.0 · no paid edition</p>
+    <h1>Every model call governed.<br>Every decision on the record.</h1>
+    <p class="lede">Theophylax is an AI gateway that sits between your people, apps and agents and the models they use. Claude Code, Codex CLI and the Anthropic and OpenAI SDKs work unchanged, across Anthropic, AWS Bedrock, Google Vertex AI, Azure and any OpenAI-compatible endpoint.</p>
+    <div class="cta">
+      <a class="btn primary" href="docs/getting-started.html">Get started</a>
+      <a class="btn" href="{{.RepoURL}}" rel="noopener">View on GitHub</a>
+    </div>
+  </section>
+
+  <section class="pillars" aria-label="What it does">
+    <div><h2>Protect</h2><p>Secrets are swapped for placeholders before any model sees them, and policy is enforced on every prompt, tool result and response.</p></div>
+    <div><h2>Control</h2><p>Decide who can call which models, through which providers, at what cost, with budgets, rate limits, routing and failover.</p></div>
+    <div><h2>Prove</h2><p>Every request gets an Ed25519-signed receipt that anyone can verify offline, anchored in a hash-chained audit log.</p></div>
+  </section>
+
+  <section class="band">
+    <h2>Try it in one command</h2>
+    <p>Postgres and the gateway, with a mock model and demo data. No provider credentials needed.</p>
+<pre><code class="language-bash">git clone {{.RepoURL}}.git theophylax &amp;&amp; cd theophylax
+docker compose -f deploy/compose/docker-compose.yml up --build
+# open http://localhost:8080 and sign in as admin@example.com / change-me-please</code></pre>
+    <p>Then point Claude Code at it:</p>
+<pre><code class="language-bash">export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=tpx_…   # create one under API keys
+claude</code></pre>
+    <p><a href="docs/getting-started.html">Read the full setup guide</a>, covering the binary, Kubernetes, providers, SSO and a production checklist.</p>
+  </section>
+
+  <section class="features">
+    <h2>What makes it different</h2>
+    <div class="grid">
+      <article><h3>Proof-of-Inference receipts</h3><p>Signed receipts record who called, digests of the exact request and response, where the request was routed, which guardrail versions applied and what it cost. They contain no prompt content. <a href="docs/receipts.html">Receipts</a> · <a href="docs/receipt-spec.html">spec</a></p></article>
+      <article><h3>Secret Shield</h3><p>Cloud keys, tokens, private keys and connection strings are replaced before the model sees them, and optionally restored in the response, streams included. <a href="docs/guardrails.html">Guardrails</a></p></article>
+      <article><h3>Prompt-injection defence</h3><p>In-process, multi-layer detection: de-obfuscation, smuggled characters, encoded payloads and indirect injection through tool results. It is measured in the open against a committed corpus. <a href="docs/guardrails.html#how-well-it-works">How well it works</a></p></article>
+      <article><h3>Eval-gated rollouts</h3><p>Shadow a new model on live traffic and let a judge compare its answers with the current model's. Then canary it and promote or roll back automatically. <a href="docs/rollouts.html">Rollouts</a></p></article>
+      <article><h3>Responses API on Claude</h3><p>Codex CLI and the OpenAI Agents SDK run on Claude through Bedrock, Vertex, Foundry or Anthropic, translated by the gateway. <a href="docs/api.html">API reference</a></p></article>
+      <article><h3>Enterprise identity, included</h3><p>OIDC SSO, SCIM, roles across orgs, teams and projects, audit logs and Prometheus metrics, with nothing held back for a paid tier. <a href="docs/identity.html">Identity</a></p></article>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2>Works with what you already run</h2>
+    <div class="cols">
+      <div><h3>Providers</h3><p>Anthropic · AWS Bedrock (IRSA, Pod Identity, Entra federation) · Vertex AI · Gemini API · Azure AI Foundry · Azure OpenAI · OpenAI-compatible endpoints (Groq, Mistral, Together, DeepSeek, xAI, OpenRouter, Ollama, vLLM and more) · custom OAuth providers</p></div>
+      <div><h3>Clients</h3><p>Claude Code · Codex CLI · Anthropic and OpenAI SDKs · OpenAI Agents SDK · anything that speaks Messages, Chat Completions or Responses</p></div>
+      <div><h3>Operations</h3><p>Single Go binary and PostgreSQL · Helm chart · OpenTelemetry traces · Splunk and Elastic log streaming · configuration as code · migration from LiteLLM</p></div>
+    </div>
+  </section>
+
+  <section class="docsindex">
+    <h2>Documentation</h2>
+    <ul>
+    {{range .Nav}}<li><a href="docs/{{.File}}">{{.Title}}</a></li>
+    {{end}}</ul>
+  </section>
+</main>
+
+<footer class="sitefoot">
+  <p>Theophylax is free software under the Apache License 2.0, with no telemetry. <a href="{{.RepoURL}}/blob/main/GOVERNANCE.md" rel="noopener">Governance</a> · <a href="{{.RepoURL}}/blob/main/SECURITY.md" rel="noopener">Security</a> · <a href="{{.RepoURL}}/blob/main/CONTRIBUTING.md" rel="noopener">Contribute</a></p>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>
